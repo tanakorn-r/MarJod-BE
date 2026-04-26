@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      DB_PATH: "/data/finance.db"
+      OLLAMA_URL: "http://host.docker.internal:11434"
+      OLLAMA_MODEL: "llama3.2:latest"
+      CORS_ORIGINS: "http://localhost:5173,https://showpiece-frigidly-unless.ngrok-free.dev"
+      LINE_CHANNEL_TOKEN: "vVIBouZujK2ijnpkg1xBQlzSn6HQP/Hk3L9KPBdhYDzSjaSVbHU2uh745kPZ4RB/Tq1f8KBU4/oYlAIKCmSnD0GIecRQWPWFy3K6vEYC5PdZSgQieea+wVrJ0D6K7WA9CvaWXVfXY7LpugsNiFAT0QdB04t89/1O/w1cDnyilFU="
+      LINE_CHANNEL_SECRET: ""
+    volumes:
+      - db_data:/data
+
+volumes:
+  db_data:

@@ -1,0 +1,293 @@
+basePath: /
+definitions:
+  controller.ChatRequest:
+    properties:
+      message:
+        example: spent 250 baht on lunch
+        type: string
+    required:
+    - message
+    type: object
+  controller.CorrectionRequest:
+    properties:
+      behavior_tag:
+        example: treat
+        type: string
+      brand:
+        example: Starbucks
+        type: string
+      category:
+        example: Food & Drink
+        type: string
+      sub_category:
+        example: Coffee
+        type: string
+    type: object
+  controller.ErrorResponse:
+    properties:
+      error:
+        example: something went wrong
+        type: string
+    type: object
+  controller.LineEvent:
+    properties:
+      message:
+        $ref: '#/definitions/controller.LineMessage'
+      replyToken:
+        example: nHuyWiB7yP5Zw52FIkcQobQuGDXCTA
+        type: string
+      type:
+        example: message
+        type: string
+    type: object
+  controller.LineMessage:
+    properties:
+      text:
+        example: spent 100 baht on coffee
+        type: string
+      type:
+        example: text
+        type: string
+    type: object
+  controller.LinePayload:
+    properties:
+      events:
+        items:
+          $ref: '#/definitions/controller.LineEvent'
+        type: array
+    type: object
+  model.Transaction:
+    properties:
+      amount:
+        type: number
+      behavior_tag:
+        description: e.g. "impulse", "necessity", "social", "treat", "recurring"
+        type: string
+      brand:
+        description: e.g. Starbucks, Grab, McDonald's
+        type: string
+      category:
+        description: e.g. Food & Drink, Transport, Health
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: integer
+      raw_message:
+        type: string
+      sub_category:
+        description: e.g. Coffee, Taxi, Gym
+        type: string
+      type:
+        $ref: '#/definitions/model.TransactionType'
+    type: object
+  model.TransactionType:
+    enum:
+    - income
+    - expense
+    type: string
+    x-enum-varnames:
+    - Income
+    - Expense
+  service.Summary:
+    properties:
+      balance:
+        type: number
+      total_expense:
+        type: number
+      total_income:
+        type: number
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Chat-based income/expense tracker powered by Ollama (local LLM).
+  title: Finance Chat API
+  version: "1.0"
+paths:
+  /api/chat:
+    post:
+      consumes:
+      - application/json
+      description: Waits for the full LLM response, saves the transaction, and returns
+        it.
+      parameters:
+      - description: Message to parse
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/controller.ChatRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Transaction'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Parse a natural language message (blocking)
+      tags:
+      - chat
+  /api/chat/stream:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Streams LLM tokens as Server-Sent Events. Each token is sent as `event: token`.
+        When the model finishes, the saved transaction is sent as `event: done` with JSON body.
+        On error, `event: error` is sent and the stream closes.
+      parameters:
+      - description: Message to parse
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/controller.ChatRequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Parse a natural language message (SSE streaming)
+      tags:
+      - chat
+  /api/summary:
+    get:
+      description: Returns total income, total expense, and current balance.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.Summary'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Get financial summary
+      tags:
+      - transactions
+  /api/transactions:
+    get:
+      description: Returns all saved income and expense transactions, newest first.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.Transaction'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: List all transactions
+      tags:
+      - transactions
+  /api/transactions/{id}:
+    delete:
+      description: Remove a transaction by its ID.
+      parameters:
+      - description: Transaction ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Delete a transaction
+      tags:
+      - transactions
+  /api/transactions/{id}/correct:
+    patch:
+      consumes:
+      - application/json
+      description: User can fix category, sub_category, brand or behavior_tag. Corrections
+        are saved and fed back to the AI on future requests.
+      parameters:
+      - description: Transaction ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Fields to correct (only non-empty fields are applied)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/controller.CorrectionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.Transaction'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Correct a transaction's classification
+      tags:
+      - transactions
+  /webhook:
+    post:
+      consumes:
+      - application/json
+      description: Receives events from Line and replies with AI-parsed transaction
+        info. Always returns 200.
+      parameters:
+      - description: Line webhook payload
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/controller.LinePayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Line Messaging API webhook
+      tags:
+      - webhook
+swagger: "2.0"
