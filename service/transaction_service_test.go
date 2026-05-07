@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"finance-chat/agent"
 	"finance-chat/model"
 	"finance-chat/service"
 	"fmt"
@@ -25,6 +26,11 @@ func (m *mockLLM) CompleteStream(_ string) (<-chan string, error) {
 	close(ch)
 	return ch, m.err
 }
+
+type mockLineService struct{}
+
+func (m *mockLineService) VerifySignature(_ []byte, _ string) bool { return true }
+func (m *mockLineService) ReplyMessage(_, _ string) error          { return nil }
 
 type mockTxRepo struct {
 	created  []*model.Transaction
@@ -78,31 +84,75 @@ func (r *mockCorrectionRepo) FindRecent(_ int) ([]model.UserCorrection, error) {
 	return list, nil
 }
 
+func (r *mockCorrectionRepo) FindAll() ([]model.UserCorrection, error) {
+	var list []model.UserCorrection
+	for _, c := range r.saved {
+		list = append(list, *c)
+	}
+	return list, nil
+}
+
+func (r *mockCorrectionRepo) Delete(_ uint) error {
+	return nil
+}
+
+type mockProfileRepo struct{}
+
+func (r *mockProfileRepo) Save(_ *model.BehaviorProfile) error { return nil }
+func (r *mockProfileRepo) FindLatestByUserID(_ string) (*model.BehaviorProfile, error) {
+	return nil, fmt.Errorf("not found")
+}
+
+type mockPlanRepo struct{}
+
+func (r *mockPlanRepo) FindByUserID(_ string) (*model.UserPlan, error) {
+	// Return a default free plan for tests
+	return &model.UserPlan{
+		UserID:     "default",
+		Plan:       model.PlanFree,
+		StartDate:  time.Now(),
+		ExpiryDate: time.Now().Add(30 * 24 * time.Hour),
+	}, nil
+}
+
+func (r *mockPlanRepo) Upsert(_ *model.UserPlan) error { return nil }
+
 // newService creates a fresh service instance bypassing the singleton for tests.
-func newService(llm service.LLMClient, txRepo *mockTxRepo, corrRepo *mockCorrectionRepo) service.TransactionService {
-	return service.NewTransactionServiceDirect(txRepo, corrRepo, llm)
+func newService(llm agent.LLMClient, txRepo *mockTxRepo, corrRepo *mockCorrectionRepo) service.TransactionService {
+	agentDeps := agent.AgentDeps{
+		LLM:         llm,
+		LineService: &mockLineService{},
+		TxRepo:      txRepo,
+		ProfileRepo: &mockProfileRepo{},
+		PlanRepo:    &mockPlanRepo{},
+	}
+	return service.NewTransactionServiceDirect(txRepo, corrRepo, &mockProfileRepo{}, &mockPlanRepo{}, agentDeps)
 }
 
 // ── Chat tests ────────────────────────────────────────────────────────────────
 
 func TestChat_ExpenseSavedCorrectly(t *testing.T) {
 	llm := &mockLLM{response: `{
+		"raw_message": "starbucks 180 baht",
 		"type": "expense",
 		"amount": 180,
 		"category": "Food & Beverage",
 		"sub_category": "Coffee",
 		"brand": "Starbucks",
 		"description": "Latte at Starbucks",
-		"behavior_tag": "cafe"
+		"behavior_tag": "treat",
+		"logic_gate": "Verified: Starbucks → Food & Beverage.",
+		"confidence": 90
 	}`}
 	txRepo := &mockTxRepo{}
 	svc := newService(llm, txRepo, &mockCorrectionRepo{})
 
-	tx, err := svc.Chat("starbucks 180 baht")
+	result, err := svc.Chat("starbucks 180 baht")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	tx := result.Transaction
 	if tx.Type != model.Expense {
 		t.Errorf("type: want expense, got %s", tx.Type)
 	}
@@ -115,8 +165,8 @@ func TestChat_ExpenseSavedCorrectly(t *testing.T) {
 	if tx.Category != "Food & Beverage" {
 		t.Errorf("category: want Food & Beverage, got %s", tx.Category)
 	}
-	if tx.BehaviorTag != "cafe" {
-		t.Errorf("behavior_tag: want cafe, got %s", tx.BehaviorTag)
+	if tx.BehaviorTag != "treat" {
+		t.Errorf("behavior_tag: want treat, got %s", tx.BehaviorTag)
 	}
 	if len(txRepo.created) != 1 {
 		t.Errorf("expected 1 saved transaction, got %d", len(txRepo.created))
@@ -124,14 +174,15 @@ func TestChat_ExpenseSavedCorrectly(t *testing.T) {
 }
 
 func TestChat_IncomeSavedCorrectly(t *testing.T) {
-	llm := &mockLLM{response: `{"type":"income","amount":50000,"category":"Salary & Income","sub_category":"Salary","brand":"Company","description":"Monthly salary","behavior_tag":"income"}`}
+	llm := &mockLLM{response: `{"raw_message":"เงินเดือน 50000","type":"income","amount":50000,"category":"Salary & Income","sub_category":"Salary","brand":"Company","description":"Monthly salary","behavior_tag":"recurring","logic_gate":"Verified: เงินเดือน → income.","confidence":99}`}
 	txRepo := &mockTxRepo{}
 	svc := newService(llm, txRepo, &mockCorrectionRepo{})
 
-	tx, err := svc.Chat("เงินเดือน 50000")
+	result, err := svc.Chat("เงินเดือน 50000")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	tx := result.Transaction
 	if tx.Type != model.Income {
 		t.Errorf("type: want income, got %s", tx.Type)
 	}
@@ -140,17 +191,15 @@ func TestChat_IncomeSavedCorrectly(t *testing.T) {
 	}
 }
 
-func TestChat_UnknownTypeFallsBackToExpense(t *testing.T) {
-	llm := &mockLLM{response: `{"type":"unknown","amount":100,"category":"Other","sub_category":"General","brand":"X","description":"test","behavior_tag":"daily"}`}
+func TestChat_UnknownType_ReturnsError(t *testing.T) {
+	// With strict validation, an invalid type now returns an error from Parse()
+	llm := &mockLLM{response: `{"raw_message":"something 100","type":"unknown","amount":100,"category":"Other","sub_category":"General","brand":"General","description":"test","behavior_tag":"necessity","logic_gate":"Flagged: unknown type.","confidence":50}`}
 	txRepo := &mockTxRepo{}
 	svc := newService(llm, txRepo, &mockCorrectionRepo{})
 
-	tx, err := svc.Chat("something 100")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if tx.Type != model.Expense {
-		t.Errorf("unknown type should fall back to expense, got %s", tx.Type)
+	_, err := svc.Chat("something 100")
+	if err == nil {
+		t.Fatal("expected error for invalid type 'unknown', got nil")
 	}
 }
 

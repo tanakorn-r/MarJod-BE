@@ -31,12 +31,12 @@ type ErrorResponse struct {
 
 // Chat godoc
 // @Summary      Parse a natural language message (blocking)
-// @Description  Waits for the full LLM response, saves the transaction, and returns it.
+// @Description  Waits for the full LLM response, runs the agent pipeline, and returns the result with transaction, behavior DNA, alerts, and recommendations.
 // @Tags         chat
 // @Accept       json
 // @Produce      json
 // @Param        body  body      ChatRequest        true  "Message to parse"
-// @Success      201   {object}  model.Transaction
+// @Success      201   {object}  agent.PipelineResult
 // @Failure      400   {object}  ErrorResponse
 // @Failure      500   {object}  ErrorResponse
 // @Router       /api/chat [post]
@@ -47,19 +47,19 @@ func (c *TransactionController) Chat(ctx *gin.Context) {
 		return
 	}
 
-	tx, err := c.svc.Chat(req.Message)
+	result, err := c.svc.Chat(req.Message)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	ctx.JSON(http.StatusCreated, tx)
+	ctx.JSON(http.StatusCreated, result)
 }
 
 // ChatStream godoc
 // @Summary      Parse a natural language message (SSE streaming)
 // @Description  Streams LLM tokens as Server-Sent Events. Each token is sent as `event: token`.
-// @Description  When the model finishes, the saved transaction is sent as `event: done` with JSON body.
+// @Description  When the model finishes, the pipeline result (transaction + behavior DNA + alerts + recommendations) is sent as `event: done` with JSON body.
 // @Description  On error, `event: error` is sent and the stream closes.
 // @Tags         chat
 // @Accept       json
@@ -94,11 +94,11 @@ func (c *TransactionController) ChatStream(ctx *gin.Context) {
 			fmt.Fprintf(w, "event: token\ndata: %s\n\n", token)
 			return true
 
-		case tx, ok := <-done:
+		case result, ok := <-done:
 			if !ok {
 				return false
 			}
-			b, _ := json.Marshal(tx)
+			b, _ := json.Marshal(result)
 			fmt.Fprintf(w, "event: done\ndata: %s\n\n", b)
 			return false
 
@@ -213,4 +213,90 @@ func (c *TransactionController) Summary(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, sum)
+}
+
+// GetByID godoc
+// @Summary      Get transaction details
+// @Description  Returns a single transaction by ID with full details.
+// @Tags         transactions
+// @Produce      json
+// @Param        id   path      int  true  "Transaction ID"
+// @Success      200  {object}  model.Transaction
+// @Failure      400  {object}  ErrorResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /api/transactions/{id} [get]
+func (c *TransactionController) GetByID(ctx *gin.Context) {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid id"})
+		return
+	}
+
+	tx, err := c.svc.GetByID(uint(id))
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, ErrorResponse{Error: "transaction not found"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, tx)
+}
+
+// Analytics godoc
+// @Summary      Get analytics dashboard data
+// @Description  Returns comprehensive analytics including monthly summary, category breakdown, spending patterns, and behavioral insights (AI analysis is mocked for now).
+// @Tags         analytics
+// @Produce      json
+// @Success      200  {object}  service.AnalyticsDashboard
+// @Failure      500  {object}  ErrorResponse
+// @Router       /api/analytics [get]
+func (c *TransactionController) Analytics(ctx *gin.Context) {
+	analytics, err := c.svc.GetAnalytics()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, analytics)
+}
+
+// ListCorrections godoc
+// @Summary      List all user corrections
+// @Description  Returns all manual corrections made by the user. These corrections are used to train the AI.
+// @Tags         corrections
+// @Produce      json
+// @Success      200  {array}   model.UserCorrection
+// @Failure      500  {object}  ErrorResponse
+// @Router       /api/corrections [get]
+func (c *TransactionController) ListCorrections(ctx *gin.Context) {
+	corrections, err := c.svc.ListCorrections()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, corrections)
+}
+
+// DeleteCorrection godoc
+// @Summary      Delete a user correction
+// @Description  Remove a correction by its ID. This will stop the AI from learning from this example.
+// @Tags         corrections
+// @Produce      json
+// @Param        id   path      int  true  "Correction ID"
+// @Success      200  {object}  map[string]string
+// @Failure      400  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /api/corrections/{id} [delete]
+func (c *TransactionController) DeleteCorrection(ctx *gin.Context) {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid id"})
+		return
+	}
+
+	if err := c.svc.DeleteCorrection(uint(id)); err != nil {
+		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "correction deleted"})
 }

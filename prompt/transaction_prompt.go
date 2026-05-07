@@ -2,302 +2,340 @@ package prompt
 
 import (
 	"encoding/json"
-	"finance-chat/model"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
+
+	"finance-chat/model"
 )
 
-// ParsedTransaction is the structured result we expect from the LLM.
+// ─────────────────────────────────────────────────────────────
+// DTOs
+// ─────────────────────────────────────────────────────────────
+
+// ParsedTransaction is the raw output from the LLM, mapped 1-to-1 with the
+// JSON schema enforced by the Auditor system prompt.
 type ParsedTransaction struct {
-	Type        string  `json:"type"`
+	RawMessage  string  `json:"raw_message"`
+	Type        string  `json:"type"`        // "income" | "expense"
 	Amount      float64 `json:"amount"`
 	Category    string  `json:"category"`
 	SubCategory string  `json:"sub_category"`
 	Brand       string  `json:"brand"`
+	BehaviorTag string  `json:"behavior_tag"` // "impulse"|"necessity"|"social"|"treat"|"recurring"
 	Description string  `json:"description"`
-	BehaviorTag string  `json:"behavior_tag"`
+	LogicGate   string  `json:"logic_gate"`  // e.g. "Verified: Uniqlo → Shopping. Shirt → Clothing."
+	Confidence  int     `json:"confidence"`  // 1–100
 }
 
-// Build returns the prompt, optionally enriched with past user corrections.
+// ParsedTransactionResult wraps ParsedTransaction with post-parse metadata.
+type ParsedTransactionResult struct {
+	*ParsedTransaction
+	LowConfidence bool `json:"low_confidence"` // true if confidence < 60
+}
+
+// ─────────────────────────────────────────────────────────────
+// PROMPT BUILDER
+// ─────────────────────────────────────────────────────────────
+
 func Build(message string, corrections []model.UserCorrection) string {
 	var sb strings.Builder
 
-	sb.WriteString(`You are a financial transaction parser and behavior analyzer.
+	sb.WriteString(basePrompt())
 
-Return ONLY valid JSON. No explanation. No extra text.
-
-You MUST fill every field. NEVER leave anything empty.
-If unsure, make the best reasonable guess.
-
-----------------------------------------
-OUTPUT FORMAT:
-
-{
-  "raw_message": "",
-  "type": "",
-  "amount": 0,
-  "category": "",
-  "sub_category": "",
-  "brand": "",
-  "behavior_tag": "",
-  "description": ""
-}
-
-----------------------------------------
-TYPE:
-
-- "expense" (default)
-- "income" ONLY if clearly receiving money
-
-Income keywords:
-เงินเดือน, โบนัส, ขาย, รายได้, ได้รับ, refund, salary
-
-----------------------------------------
-AMOUNT:
-
-- Extract number from input
-- Always positive number
-
-----------------------------------------
-CATEGORY (choose ONE only):
-
-- Food & Beverage
-- Transport
-- Bill
-- Shopping
-- Other
-
-----------------------------------------
-SUB CATEGORY (important for analytics):
-
-Food & Beverage:
-- Coffee
-- Restaurant
-- Drink
-- Convenience
-
-Transport:
-- Fuel
-- Taxi
-- Public Transport
-- Travel (flight / hotel)
-
-Bill:
-- Rent
-- Utility
-- Subscription
-- Installment
-
-Shopping:
-- Clothing
-- General
-- Grocery
-
-Other:
-- Entertainment
-- Health
-- Education
-- Investment
-
-----------------------------------------
-BEHAVIOR TAG (VERY IMPORTANT for insights):
-
-Choose ONE:
-
-- essential        (rent, bills, water, electricity)
-- daily            (food, convenience store)
-- cafe             (coffee, cafe lifestyle)
-- dining           (restaurants)
-- transport        (fuel, taxi)
-- subscription     (netflix, spotify)
-- shopping         (products, clothes)
-- entertainment    (movies, theme park, events)
-- travel           (flight, hotel)
-- health           (hospital, gym)
-- investment       (stocks, gold, crypto)
-- income
-
-----------------------------------------
-THAI UNDERSTANDING RULES (CRITICAL):
-
-1. "ค่า" means paying money (expense), BUT:
-
-   - If service/subscription → Bill
-     examples: ค่าไฟ, ค่าเน็ต, ค่าโทรศัพท์, ค่า netflix
-
-   - If product → Shopping
-     examples: ค่าเสื้อ, ค่ารองเท้า
-
-   - If hotel/flight → Transport (Travel)
-     examples: ค่าโรงแรม, ค่าตั๋วเครื่องบิน
-
-   - If ticket/entry → Other (Entertainment)
-     examples: ค่าเข้า disney, ค่าหนัง
-
-----------------------------------------
-BRAND RULE (VERY IMPORTANT):
-
-- Extract the main entity, shop, or name
-- English words are usually brand
-- If unknown → use meaningful words from input
-- NEVER leave blank
-
-Examples:
-- "Starbucks 200" → Starbucks
-- "ค่า netflix 400" → Netflix
-- "rawmat 60" → rawmat
-- "ค่าคอนโด 12000" → Condo
-
-----------------------------------------
-DESCRIPTION:
-
-Short and clear:
-- "<subcategory> at <brand>"
-OR
-- "<subcategory> expense"
-
-----------------------------------------
-LEARNING CONTEXT (IMPORTANT):
-
-User may use slang, typo, or mixed language.
-You MUST generalize meaning.
-
-Examples:
-- "rawmat" → treat as brand
-- "eat am are" → restaurant
-- "pt" → fuel station
-- "lawson" → convenience store
-
-----------------------------------------
-
-----------------------------------------
-DESCRIPTION (VERY IMPORTANT):
-
-Preserve important details from the original input.
-
-Rules:
-- Keep specific item names (americano, latte, burger, etc.)
-- Include brand/location if present
-- Keep it short but meaningful
-
-Format priority:
-1. "<specific item> at <brand>"
-2. "<specific item>"
-3. "<subcategory> at <brand>" (only if no item found)
-
-Examples:
-
-Input: ค่ากาแฟ americano 7-11 25
-→ "Americano at 7-11"
-
-Input: กิน KFC 200
-→ "KFC meal"
-
-Input: ค่า netflix 400
-→ "Netflix subscription"
-
-Input: น้ำมัน shell 1200
-→ "Fuel at Shell"
-
-
-EXAMPLES:
-
-Input: ค่าเสื้อ Arrow 2500
-Output:
-{
-  "raw_message": "ค่าเสื้อ Arrow 2500",
-  "type": "expense",
-  "amount": 2500,
-  "category": "Shopping",
-  "sub_category": "Clothing",
-  "brand": "Arrow",
-  "behavior_tag": "shopping",
-  "description": "Clothing at Arrow"
-}
-
-Input: ค่า netflix 400
-Output:
-{
-  "raw_message": "ค่า netflix 400",
-  "type": "expense",
-  "amount": 400,
-  "category": "Bill",
-  "sub_category": "Subscription",
-  "brand": "Netflix",
-  "behavior_tag": "subscription",
-  "description": "Subscription at Netflix"
-}
-
-Input: ค่าโรงแรม intercontinental 12000
-Output:
-{
-  "raw_message": "ค่าโรงแรม intercontinental 12000",
-  "type": "expense",
-  "amount": 12000,
-  "category": "Transport",
-  "sub_category": "Travel",
-  "brand": "Intercontinental",
-  "behavior_tag": "travel",
-  "description": "Travel at Intercontinental"
-}
-
-Input: ค่าเข้า disney land 2500
-Output:
-{
-  "raw_message": "ค่าเข้า disney land 2500",
-  "type": "expense",
-  "amount": 2500,
-  "category": "Other",
-  "sub_category": "Entertainment",
-  "brand": "Disney Land",
-  "behavior_tag": "entertainment",
-  "description": "Entertainment at Disney Land"
-}
-
-----------------------------------------
-NOW PARSE:
-
-Input: {{USER_INPUT}}
-`)
-
+	// Inject user learning (Limited to last 5 to save tokens/focus)
 	if len(corrections) > 0 {
-		sb.WriteString(`----------------------------------------
-USER LEARNING RULE (HIGH PRIORITY):
+		sb.WriteString("\n----------------------------------------\n")
+		sb.WriteString("USER PREFERENCES (Prioritize these patterns):\n")
 
-The following are user-defined classification rules.
+		limit := len(corrections)
+		if limit > 5 {
+			limit = 5
+		}
 
-You MUST follow them when relevant,
-but still consider the full context.
-
-Do NOT blindly apply them if the input clearly belongs to a different concept.
-
-----------------------------------------`)
-		for _, c := range corrections {
+		for _, c := range corrections[0:limit] {
 			sb.WriteString(fmt.Sprintf(
-				`- keyword "%s" should be classified as category: %s, sub_category: %s, behavior_tag: %s`+"\n",
+				`- When input is like "%s" → use category: %s, sub: %s, tag: %s`+"\n",
 				extractKeyword(c.RawMessage),
 				c.Category,
 				c.SubCategory,
 				c.BehaviorTag,
 			))
 		}
-		sb.WriteString("\n")
 	}
-	sb.WriteString(fmt.Sprintf("Message: \"%s\"\n\nJSON:", message))
+
+	sb.WriteString(fmt.Sprintf(`
+----------------------------------------
+FINAL TASK:
+Parse this input into ONE JSON object. Use Thai context for brands.
+
+Input: "%s"
+
+Return ONLY JSON.
+`, message))
+
 	return sb.String()
 }
 
-func extractKeyword(input string) string {
-	words := strings.Fields(strings.ToLower(input))
+// ─────────────────────────────────────────────────────────────
+// BASE PROMPT — The Chief Auditor (strict JSON schema)
+// ─────────────────────────────────────────────────────────────
 
+func basePrompt() string {
+	return `You are The Chief Auditor. Precise. Terse. Audit-focused.
+Your sole output is a single valid JSON object. No prose. No markdown. No explanation.
+
+### REQUIRED JSON SCHEMA
+
+{
+  "raw_message":   string   — the original user input, verbatim,
+  "type":          string   — MUST be exactly "income" or "expense",
+  "amount":        number   — positive numeric value (no currency symbols),
+  "category":      string   — top-level spending domain (e.g. "Food & Beverage", "Shopping", "Transport", "Bill", "Health", "Entertainment", "Salary & Income"),
+  "sub_category":  string   — logical subset of category (e.g. "Coffee", "Shirt", "Taxi"),
+  "brand":         string   — real-world brand or merchant name (e.g. "Starbucks", "Uniqlo", "Grab"); use "General" if unknown,
+  "behavior_tag":  string   — MUST be exactly one of: "impulse", "necessity", "social", "treat", "recurring",
+  "description":   string   — one concise sentence describing the transaction,
+  "logic_gate":    string   — your audit trail, e.g. "Verified: Uniqlo → Shopping. Shirt → Clothing.",
+  "confidence":    integer  — your certainty score, integer between 1 and 100 (inclusive)
+}
+
+### FIELD CONSTRAINTS (STRICT)
+- "type": only "income" or "expense" — any other value is REJECTED.
+- "behavior_tag": only "impulse", "necessity", "social", "treat", or "recurring" — any other value is REJECTED.
+- "confidence": integer 1–100 — decimals and out-of-range values are REJECTED.
+- NEVER omit any field. All 10 fields are mandatory.
+- Return ONLY valid JSON. No text before or after the JSON object.
+
+### FEW-SHOT EXAMPLES (Thai context)
+
+Example 1 — Clothing purchase at Uniqlo:
+Input: "ซื้อเสื้อ Uniqlo 590 บาท"
+{
+  "raw_message":  "ซื้อเสื้อ Uniqlo 590 บาท",
+  "type":         "expense",
+  "amount":       590,
+  "category":     "Shopping",
+  "sub_category": "Clothing",
+  "brand":        "Uniqlo",
+  "behavior_tag": "treat",
+  "description":  "Purchased a shirt at Uniqlo for 590 THB.",
+  "logic_gate":   "Verified: Uniqlo → Shopping. เสื้อ (shirt) → Clothing. Price 590 THB is moderate treat.",
+  "confidence":   95
+}
+
+Example 2 — Coffee at Starbucks:
+Input: "กาแฟ starbucks 180"
+{
+  "raw_message":  "กาแฟ starbucks 180",
+  "type":         "expense",
+  "amount":       180,
+  "category":     "Food & Beverage",
+  "sub_category": "Coffee",
+  "brand":        "Starbucks",
+  "behavior_tag": "treat",
+  "description":  "Coffee at Starbucks for 180 THB.",
+  "logic_gate":   "Verified: Starbucks → Food & Beverage. กาแฟ (coffee) → Coffee. Flagged: premium price → treat.",
+  "confidence":   97
+}
+
+Example 3 — Monthly salary income:
+Input: "เงินเดือน 35000"
+{
+  "raw_message":  "เงินเดือน 35000",
+  "type":         "income",
+  "amount":       35000,
+  "category":     "Salary & Income",
+  "sub_category": "Salary",
+  "brand":        "General",
+  "behavior_tag": "recurring",
+  "description":  "Monthly salary of 35,000 THB.",
+  "logic_gate":   "Verified: เงินเดือน → income. Salary → recurring. Rejected: expense classification.",
+  "confidence":   99
+}
+
+Example 4 — Grab taxi ride:
+Input: "grab ไปออฟฟิศ 85 บาท"
+{
+  "raw_message":  "grab ไปออฟฟิศ 85 บาท",
+  "type":         "expense",
+  "amount":       85,
+  "category":     "Transport",
+  "sub_category": "Taxi",
+  "brand":        "Grab",
+  "behavior_tag": "necessity",
+  "description":  "Grab taxi to office for 85 THB.",
+  "logic_gate":   "Verified: Grab → Transport. ไปออฟฟิศ (to office) → necessity commute. Flagged: daily pattern → necessity.",
+  "confidence":   96
+}
+
+Example 5 — Electricity bill:
+Input: "ค่าไฟ 1200"
+{
+  "raw_message":  "ค่าไฟ 1200",
+  "type":         "expense",
+  "amount":       1200,
+  "category":     "Bill",
+  "sub_category": "Electricity",
+  "brand":        "MEA",
+  "behavior_tag": "recurring",
+  "description":  "Monthly electricity bill of 1,200 THB.",
+  "logic_gate":   "Verified: ค่าไฟ → Bill. Electricity → recurring utility. Rejected: impulse/treat classification.",
+  "confidence":   98
+}
+`
+}
+
+// ─────────────────────────────────────────────────────────────
+// VALIDATION
+// ─────────────────────────────────────────────────────────────
+
+var validTypes = map[string]bool{
+	"income":  true,
+	"expense": true,
+}
+
+var validBehaviorTags = map[string]bool{
+	"impulse":   true,
+	"necessity": true,
+	"social":    true,
+	"treat":     true,
+	"recurring": true,
+}
+
+// validateParsedTransaction checks all required fields and enum constraints.
+func validateParsedTransaction(r *ParsedTransaction) error {
+	// Check all 10 required fields are non-zero/non-empty
+	if r.RawMessage == "" {
+		return fmt.Errorf("missing required field: raw_message")
+	}
+	if r.Type == "" {
+		return fmt.Errorf("missing required field: type")
+	}
+	if r.Amount == 0 {
+		return fmt.Errorf("missing required field: amount")
+	}
+	if r.Category == "" {
+		return fmt.Errorf("missing required field: category")
+	}
+	if r.SubCategory == "" {
+		return fmt.Errorf("missing required field: sub_category")
+	}
+	if r.Brand == "" {
+		return fmt.Errorf("missing required field: brand")
+	}
+	if r.BehaviorTag == "" {
+		return fmt.Errorf("missing required field: behavior_tag")
+	}
+	if r.Description == "" {
+		return fmt.Errorf("missing required field: description")
+	}
+	if r.LogicGate == "" {
+		return fmt.Errorf("missing required field: logic_gate")
+	}
+	if r.Confidence == 0 {
+		return fmt.Errorf("missing required field: confidence")
+	}
+
+	// Validate type enum
+	if !validTypes[r.Type] {
+		return fmt.Errorf("invalid value for field type: %q (must be \"income\" or \"expense\")", r.Type)
+	}
+
+	// Validate behavior_tag enum
+	if !validBehaviorTags[r.BehaviorTag] {
+		return fmt.Errorf("invalid value for field behavior_tag: %q (must be one of: impulse, necessity, social, treat, recurring)", r.BehaviorTag)
+	}
+
+	// Validate confidence range [1, 100]
+	if r.Confidence < 1 || r.Confidence > 100 {
+		return fmt.Errorf("invalid value for field confidence: %d (must be between 1 and 100)", r.Confidence)
+	}
+
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────
+// PARSE & NORMALIZE
+// ─────────────────────────────────────────────────────────────
+
+func Parse(raw string) (*ParsedTransactionResult, error) {
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+
+	if start == -1 || end == -1 || end <= start {
+		return nil, fmt.Errorf("no valid JSON found")
+	}
+
+	clean := raw[start : end+1]
+
+	var result ParsedTransaction
+	if err := json.Unmarshal([]byte(clean), &result); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %w", err)
+	}
+
+	if err := validateParsedTransaction(&result); err != nil {
+		return nil, err
+	}
+
+	normalized := Normalize(&result)
+
+	return &ParsedTransactionResult{
+		ParsedTransaction: normalized,
+		LowConfidence:     normalized.Confidence < 60,
+	}, nil
+}
+
+func Normalize(r *ParsedTransaction) *ParsedTransaction {
+	// 1. Amount Safety
+	r.Amount = math.Abs(r.Amount)
+
+	// 2. Category Normalization (Standardize strings)
+	cat := strings.ToLower(r.Category)
+	if strings.Contains(cat, "food") || strings.Contains(cat, "drink") {
+		r.Category = "Food & Beverage"
+	} else if strings.Contains(cat, "transport") || strings.Contains(cat, "travel") {
+		r.Category = "Transport"
+	} else if strings.Contains(cat, "bill") || strings.Contains(cat, "utility") {
+		r.Category = "Bill"
+	} else if strings.Contains(cat, "shop") {
+		r.Category = "Shopping"
+	} else {
+		r.Category = "Other"
+	}
+
+	// 3. Brand Cleanup
+	r.Brand = strings.TrimSpace(r.Brand)
+	if r.Brand == "" || strings.ToLower(r.Brand) == "unknown" {
+		r.Brand = "General"
+	}
+
+	// 4. Description Fix (Anti-hallucination)
+	// We want to ensure the description actually reflects reality
+	if strings.TrimSpace(r.Description) == "" {
+		r.Description = fmt.Sprintf("%s at %s", r.SubCategory, r.Brand)
+	}
+
+	return r
+}
+
+// ─────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────
+
+func extractKeyword(input string) string {
+	// Simple cleaner to extract the "core" of a correction
+	// e.g. "Buy coffee at bts" -> "coffee bts"
+	stopWords := map[string]bool{"ค่า": true, "กิน": true, "ซื้อ": true, "ไป": true, "บาท": true}
+	words := strings.Fields(strings.ToLower(input))
 	var result []string
 
 	for _, w := range words {
 		if _, err := strconv.ParseFloat(w, 64); err == nil {
-			continue
+			continue // skip numbers
 		}
-		if w == "ค่า" || w == "กิน" || w == "ซื้อ" {
+		if stopWords[w] {
 			continue
 		}
 		result = append(result, w)
@@ -306,28 +344,5 @@ func extractKeyword(input string) string {
 	if len(result) == 0 {
 		return input
 	}
-
 	return strings.Join(result, " ")
-}
-
-// Parse extracts a ParsedTransaction from the raw LLM response text.
-func Parse(raw string) (*ParsedTransaction, error) {
-	start, end := -1, -1
-	for i, c := range raw {
-		if c == '{' && start == -1 {
-			start = i
-		}
-		if c == '}' {
-			end = i
-		}
-	}
-	if start == -1 || end == -1 {
-		return nil, fmt.Errorf("no JSON found in LLM response: %s", raw)
-	}
-
-	var result ParsedTransaction
-	if err := json.Unmarshal([]byte(raw[start:end+1]), &result); err != nil {
-		return nil, fmt.Errorf("invalid JSON from LLM: %w", err)
-	}
-	return &result, nil
 }

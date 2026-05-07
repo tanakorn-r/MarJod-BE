@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"finance-chat/agent"
 	"finance-chat/config"
 	"fmt"
 	"io"
@@ -11,29 +12,17 @@ import (
 	"sync"
 )
 
-// LLMClient is a generic interface for any LLM backend.
-// It knows nothing about finance — just sends a prompt and returns text.
-type LLMClient interface {
-	// Complete sends a prompt and waits for the full response.
-	Complete(prompt string) (string, error)
-
-	// CompleteStream sends a prompt and returns a channel of token strings.
-	// The caller must drain the channel. A non-nil error is sent as the last
-	// value prefixed with "error:" if something goes wrong mid-stream.
-	CompleteStream(prompt string) (<-chan string, error)
-}
-
 type ollamaClient struct {
 	cfg    *config.Config
 	client *http.Client
 }
 
 var (
-	ollamaInstance LLMClient
+	ollamaInstance agent.LLMClient
 	ollamaOnce     sync.Once
 )
 
-func NewOllamaClient(cfg *config.Config) LLMClient {
+func NewOllamaClient(cfg *config.Config) agent.LLMClient {
 	ollamaOnce.Do(func() {
 		ollamaInstance = &ollamaClient{
 			cfg:    cfg,

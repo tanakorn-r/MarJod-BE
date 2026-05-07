@@ -6,16 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"finance-chat/agent"
 	"finance-chat/config"
 	"fmt"
 	"net/http"
 	"sync"
 )
-
-type LineService interface {
-	VerifySignature(body []byte, signature string) bool
-	ReplyMessage(replyToken, text string) error
-}
 
 type lineService struct {
 	cfg    *config.Config
@@ -23,11 +19,11 @@ type lineService struct {
 }
 
 var (
-	lineInstance LineService
+	lineInstance agent.LineService
 	lineOnce     sync.Once
 )
 
-func NewLineService(cfg *config.Config) LineService {
+func NewLineService(cfg *config.Config) agent.LineService {
 	lineOnce.Do(func() {
 		lineInstance = &lineService{cfg: cfg, client: &http.Client{}}
 	})

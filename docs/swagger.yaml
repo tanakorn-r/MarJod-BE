@@ -36,6 +36,8 @@ definitions:
       replyToken:
         example: nHuyWiB7yP5Zw52FIkcQobQuGDXCTA
         type: string
+      source:
+        $ref: '#/definitions/controller.LineSource'
       type:
         example: message
         type: string
@@ -55,6 +57,11 @@ definitions:
         items:
           $ref: '#/definitions/controller.LineEvent'
         type: array
+    type: object
+  controller.LineSource:
+    properties:
+      userId:
+        type: string
     type: object
   model.Transaction:
     properties:
@@ -91,6 +98,162 @@ definitions:
     x-enum-varnames:
     - Income
     - Expense
+  model.UserCorrection:
+    properties:
+      behavior_tag:
+        type: string
+      brand:
+        type: string
+      category:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      raw_message:
+        description: original message that was misclassified
+        type: string
+      sub_category:
+        type: string
+    type: object
+  service.Alert:
+    properties:
+      message:
+        type: string
+      type:
+        description: '"warning", "info", "success"'
+        type: string
+    type: object
+  service.AnalyticsDashboard:
+    properties:
+      behavior_insights:
+        items:
+          $ref: '#/definitions/service.BehaviorInsight'
+        type: array
+      category_breakdown:
+        items:
+          $ref: '#/definitions/service.CategoryBreakdown'
+        type: array
+      daily_spending:
+        items:
+          $ref: '#/definitions/service.DailySpending'
+        type: array
+      expense_comparison:
+        $ref: '#/definitions/service.ComparisonMetric'
+      irregular_purchases:
+        items:
+          $ref: '#/definitions/service.IrregularPurchase'
+        type: array
+      monthly_summary:
+        $ref: '#/definitions/service.MonthlySummary'
+      recent_highlights:
+        items:
+          $ref: '#/definitions/service.HighlightedTransaction'
+        type: array
+      savings_comparison:
+        $ref: '#/definitions/service.ComparisonMetric'
+      spending_by_day_of_week:
+        items:
+          $ref: '#/definitions/service.DayOfWeekSpending'
+        type: array
+    type: object
+  service.BehaviorInsight:
+    properties:
+      description:
+        type: string
+      icon:
+        description: emoji or icon name
+        type: string
+      metric:
+        description: e.g. "3 times this week"
+        type: string
+      title:
+        type: string
+    type: object
+  service.CategoryBreakdown:
+    properties:
+      amount:
+        type: number
+      category:
+        type: string
+      percentage:
+        type: number
+      rank:
+        type: integer
+      sub_category:
+        type: string
+    type: object
+  service.ComparisonMetric:
+    properties:
+      amount:
+        type: number
+      label:
+        description: '"vs last month", "vs last week"'
+        type: string
+      percentage:
+        description: positive or negative
+        type: number
+    type: object
+  service.DailySpending:
+    properties:
+      date:
+        description: e.g. "2025-04-01"
+        type: string
+      expense:
+        type: number
+      income:
+        type: number
+    type: object
+  service.DayOfWeekSpending:
+    properties:
+      amount:
+        type: number
+      day:
+        description: '"Mon", "Tue", etc.'
+        type: string
+    type: object
+  service.HighlightedTransaction:
+    properties:
+      amount:
+        type: number
+      category:
+        type: string
+      description:
+        type: string
+      highlight:
+        description: '"most_spent", "unusual", "recurring"'
+        type: string
+      id:
+        type: integer
+    type: object
+  service.IrregularPurchase:
+    properties:
+      amount:
+        type: number
+      brand:
+        type: string
+      date:
+        type: string
+      description:
+        type: string
+      reason:
+        description: why it's irregular
+        type: string
+    type: object
+  service.MonthlySummary:
+    properties:
+      alert:
+        $ref: '#/definitions/service.Alert'
+      balance:
+        type: number
+      month:
+        description: e.g. "April 2025"
+        type: string
+      total_expense:
+        type: number
+      total_income:
+        type: number
+    type: object
   service.Summary:
     properties:
       balance:
@@ -107,6 +270,25 @@ info:
   title: Finance Chat API
   version: "1.0"
 paths:
+  /api/analytics:
+    get:
+      description: Returns comprehensive analytics including monthly summary, category
+        breakdown, spending patterns, and behavioral insights (AI analysis is mocked
+        for now).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.AnalyticsDashboard'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Get analytics dashboard data
+      tags:
+      - analytics
   /api/chat:
     post:
       consumes:
@@ -169,6 +351,56 @@ paths:
       summary: Parse a natural language message (SSE streaming)
       tags:
       - chat
+  /api/corrections:
+    get:
+      description: Returns all manual corrections made by the user. These corrections
+        are used to train the AI.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.UserCorrection'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: List all user corrections
+      tags:
+      - corrections
+  /api/corrections/{id}:
+    delete:
+      description: Remove a correction by its ID. This will stop the AI from learning
+        from this example.
+      parameters:
+      - description: Correction ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Delete a user correction
+      tags:
+      - corrections
   /api/summary:
     get:
       description: Returns total income, total expense, and current balance.
@@ -234,6 +466,36 @@ paths:
       summary: Delete a transaction
       tags:
       - transactions
+    get:
+      description: Returns a single transaction by ID with full details.
+      parameters:
+      - description: Transaction ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.Transaction'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Get transaction details
+      tags:
+      - transactions
   /api/transactions/{id}/correct:
     patch:
       consumes:
@@ -274,8 +536,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: Receives events from Line and replies with AI-parsed transaction
-        info. Always returns 200.
+      description: |-
+        Receives events from Line and replies with AI-parsed transaction info. Always returns 200.
+        To correct the last transaction, send: edit brand=Starbucks sub=Coffee tag=treat
       parameters:
       - description: Line webhook payload
         in: body

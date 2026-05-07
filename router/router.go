@@ -2,6 +2,7 @@ package router
 
 import (
 	"encoding/json"
+	"finance-chat/agent"
 	"finance-chat/config"
 	"finance-chat/controller"
 	"finance-chat/repository"
@@ -21,12 +22,30 @@ import (
 )
 
 func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
+	// Repositories
 	txRepo := repository.NewTransactionRepository(db)
 	correctionRepo := repository.NewCorrectionRepository(db)
+	profileRepo := repository.NewBehaviorProfileRepository(db)
+	planRepo := repository.NewUserPlanRepository(db)
+
+	// Services
 	llm := service.NewOllamaClient(cfg)
-	txSvc := service.NewTransactionService(txRepo, correctionRepo, llm)
-	txCtrl := controller.NewTransactionController(txSvc)
 	lineSvc := service.NewLineService(cfg)
+
+	// Agent dependencies
+	agentDeps := agent.AgentDeps{
+		LLM:         llm,
+		LineService: lineSvc,
+		TxRepo:      txRepo,
+		ProfileRepo: profileRepo,
+		PlanRepo:    planRepo,
+	}
+
+	// Transaction service with agent pipeline
+	txSvc := service.NewTransactionService(txRepo, correctionRepo, profileRepo, planRepo, agentDeps)
+
+	// Controllers
+	txCtrl := controller.NewTransactionController(txSvc)
 	webhookCtrl := controller.NewWebhookController(txSvc, lineSvc)
 
 	r := gin.Default()
@@ -86,9 +105,13 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		api.POST("/chat", txCtrl.Chat)
 		api.POST("/chat/stream", txCtrl.ChatStream)
 		api.GET("/transactions", txCtrl.List)
+		api.GET("/transactions/:id", txCtrl.GetByID)
 		api.DELETE("/transactions/:id", txCtrl.Delete)
 		api.PATCH("/transactions/:id/correct", txCtrl.Correct)
 		api.GET("/summary", txCtrl.Summary)
+		api.GET("/analytics", txCtrl.Analytics)
+		api.GET("/corrections", txCtrl.ListCorrections)
+		api.DELETE("/corrections/:id", txCtrl.DeleteCorrection)
 	}
 
 	return r

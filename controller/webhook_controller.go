@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"finance-chat/agent"
 	"finance-chat/model"
 	"finance-chat/service"
 	"fmt"
@@ -40,14 +41,14 @@ type LinePayload struct {
 
 type WebhookController struct {
 	txSvc   service.TransactionService
-	lineSvc service.LineService
+	lineSvc agent.LineService
 
 	// lastTx tracks the most recent transaction per Line userId (in-memory)
 	mu     sync.Mutex
 	lastTx map[string]*model.Transaction
 }
 
-func NewWebhookController(txSvc service.TransactionService, lineSvc service.LineService) *WebhookController {
+func NewWebhookController(txSvc service.TransactionService, lineSvc agent.LineService) *WebhookController {
 	return &WebhookController{
 		txSvc:   txSvc,
 		lineSvc: lineSvc,
@@ -97,11 +98,14 @@ func (w *WebhookController) reply(replyToken, userID, text string) {
 		return
 	}
 
-	tx, err := w.txSvc.Chat(text)
+	result, err := w.txSvc.Chat(text)
 	if err != nil {
 		_ = w.lineSvc.ReplyMessage(replyToken, "Sorry, couldn't process that.")
 		return
 	}
+
+	// Extract the transaction from the pipeline result
+	tx := result.Transaction
 
 	// Remember last transaction for this user
 	w.mu.Lock()

@@ -9,6 +9,32 @@
     "host": "localhost:8080",
     "basePath": "/",
     "paths": {
+        "/api/analytics": {
+            "get": {
+                "description": "Returns comprehensive analytics including monthly summary, category breakdown, spending patterns, and behavioral insights (AI analysis is mocked for now).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get analytics dashboard data",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.AnalyticsDashboard"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/chat": {
             "post": {
                 "description": "Waits for the full LLM response, saves the transaction, and returns it.",
@@ -98,6 +124,79 @@
                 }
             }
         },
+        "/api/corrections": {
+            "get": {
+                "description": "Returns all manual corrections made by the user. These corrections are used to train the AI.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "corrections"
+                ],
+                "summary": "List all user corrections",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.UserCorrection"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/corrections/{id}": {
+            "delete": {
+                "description": "Remove a correction by its ID. This will stop the AI from learning from this example.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "corrections"
+                ],
+                "summary": "Delete a user correction",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Correction ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/summary": {
             "get": {
                 "description": "Returns total income, total expense, and current balance.",
@@ -154,6 +253,51 @@
             }
         },
         "/api/transactions/{id}": {
+            "get": {
+                "description": "Returns a single transaction by ID with full details.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transactions"
+                ],
+                "summary": "Get transaction details",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Transaction ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.Transaction"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            },
             "delete": {
                 "description": "Remove a transaction by its ID.",
                 "produces": [
@@ -252,7 +396,7 @@
         },
         "/webhook": {
             "post": {
-                "description": "Receives events from Line and replies with AI-parsed transaction info. Always returns 200.",
+                "description": "Receives events from Line and replies with AI-parsed transaction info. Always returns 200.\nTo correct the last transaction, send: edit brand=Starbucks sub=Coffee tag=treat",
                 "consumes": [
                     "application/json"
                 ],
@@ -334,6 +478,9 @@
                     "type": "string",
                     "example": "nHuyWiB7yP5Zw52FIkcQobQuGDXCTA"
                 },
+                "source": {
+                    "$ref": "#/definitions/controller.LineSource"
+                },
                 "type": {
                     "type": "string",
                     "example": "message"
@@ -361,6 +508,14 @@
                     "items": {
                         "$ref": "#/definitions/controller.LineEvent"
                     }
+                }
+            }
+        },
+        "controller.LineSource": {
+            "type": "object",
+            "properties": {
+                "userId": {
+                    "type": "string"
                 }
             }
         },
@@ -413,6 +568,240 @@
                 "Income",
                 "Expense"
             ]
+        },
+        "model.UserCorrection": {
+            "type": "object",
+            "properties": {
+                "behavior_tag": {
+                    "type": "string"
+                },
+                "brand": {
+                    "type": "string"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "raw_message": {
+                    "description": "original message that was misclassified",
+                    "type": "string"
+                },
+                "sub_category": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.Alert": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "\"warning\", \"info\", \"success\"",
+                    "type": "string"
+                }
+            }
+        },
+        "service.AnalyticsDashboard": {
+            "type": "object",
+            "properties": {
+                "behavior_insights": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.BehaviorInsight"
+                    }
+                },
+                "category_breakdown": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.CategoryBreakdown"
+                    }
+                },
+                "daily_spending": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.DailySpending"
+                    }
+                },
+                "expense_comparison": {
+                    "$ref": "#/definitions/service.ComparisonMetric"
+                },
+                "irregular_purchases": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.IrregularPurchase"
+                    }
+                },
+                "monthly_summary": {
+                    "$ref": "#/definitions/service.MonthlySummary"
+                },
+                "recent_highlights": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.HighlightedTransaction"
+                    }
+                },
+                "savings_comparison": {
+                    "$ref": "#/definitions/service.ComparisonMetric"
+                },
+                "spending_by_day_of_week": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.DayOfWeekSpending"
+                    }
+                }
+            }
+        },
+        "service.BehaviorInsight": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "icon": {
+                    "description": "emoji or icon name",
+                    "type": "string"
+                },
+                "metric": {
+                    "description": "e.g. \"3 times this week\"",
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.CategoryBreakdown": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "percentage": {
+                    "type": "number"
+                },
+                "rank": {
+                    "type": "integer"
+                },
+                "sub_category": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.ComparisonMetric": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "label": {
+                    "description": "\"vs last month\", \"vs last week\"",
+                    "type": "string"
+                },
+                "percentage": {
+                    "description": "positive or negative",
+                    "type": "number"
+                }
+            }
+        },
+        "service.DailySpending": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "description": "e.g. \"2025-04-01\"",
+                    "type": "string"
+                },
+                "expense": {
+                    "type": "number"
+                },
+                "income": {
+                    "type": "number"
+                }
+            }
+        },
+        "service.DayOfWeekSpending": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "day": {
+                    "description": "\"Mon\", \"Tue\", etc.",
+                    "type": "string"
+                }
+            }
+        },
+        "service.HighlightedTransaction": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "highlight": {
+                    "description": "\"most_spent\", \"unusual\", \"recurring\"",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "service.IrregularPurchase": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "brand": {
+                    "type": "string"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "reason": {
+                    "description": "why it's irregular",
+                    "type": "string"
+                }
+            }
+        },
+        "service.MonthlySummary": {
+            "type": "object",
+            "properties": {
+                "alert": {
+                    "$ref": "#/definitions/service.Alert"
+                },
+                "balance": {
+                    "type": "number"
+                },
+                "month": {
+                    "description": "e.g. \"April 2025\"",
+                    "type": "string"
+                },
+                "total_expense": {
+                    "type": "number"
+                },
+                "total_income": {
+                    "type": "number"
+                }
+            }
         },
         "service.Summary": {
             "type": "object",

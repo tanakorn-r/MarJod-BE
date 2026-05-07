@@ -28,7 +28,12 @@ func Get() *gorm.DB {
 }
 
 func Migrate(db *gorm.DB) {
-	if err := db.AutoMigrate(&model.Transaction{}, &model.UserCorrection{}); err != nil {
+	if err := db.AutoMigrate(
+		&model.Transaction{},
+		&model.UserCorrection{},
+		&model.BehaviorProfile{},
+		&model.UserPlan{},
+	); err != nil {
 		log.Fatalf("migration failed: %v", err)
 	}
 }
