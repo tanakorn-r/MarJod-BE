@@ -11,12 +11,16 @@ if [[ -z "$staged_go_files" ]]; then
   exit 0
 fi
 
+# GUI git clients often run hooks with a minimal PATH, so widen it before
+# looking for swag/go (common Homebrew + Go install locations).
+export PATH="$PATH:/usr/local/bin:/opt/homebrew/bin:/usr/local/go/bin:$HOME/go/bin"
+
 SWAG_BIN="$(command -v swag || true)"
-if [[ -z "$SWAG_BIN" ]]; then
+if [[ -z "$SWAG_BIN" ]] && command -v go >/dev/null 2>&1; then
   SWAG_BIN="$(go env GOPATH)/bin/swag"
 fi
 
-if [[ ! -x "$SWAG_BIN" ]]; then
+if [[ -z "$SWAG_BIN" || ! -x "$SWAG_BIN" ]]; then
   echo "⚠️  swag not found — Swagger docs were NOT regenerated." >&2
   echo "   Install with: go install github.com/swaggo/swag/cmd/swag@latest" >&2
   exit 0
