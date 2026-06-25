@@ -23,7 +23,21 @@ type SetCurrentWalletRequest struct {
 	WalletID uint `json:"wallet_id" binding:"required"`
 }
 
-// ListWallets -> GET /api/wallets
+type CreateWalletRequest struct {
+	Name   string  `json:"name" binding:"required"`
+	Icon   string  `json:"icon"`
+	Target float64 `json:"target"`
+}
+
+// ListWallets godoc
+// @Summary      List wallets
+// @Description  Returns all wallets for the user, including the implicit General wallet.
+// @Tags         wallets
+// @Produce      json
+// @Param        user_id  query     string  false  "User ID"
+// @Success      200      {array}   model.Wallet
+// @Failure      500      {object}  ErrorResponse
+// @Router       /api/wallets [get]
 func (ctrl *WalletController) ListWallets(c *gin.Context) {
 	userID := c.DefaultQuery("user_id", model.DefaultUserID)
 
@@ -36,13 +50,20 @@ func (ctrl *WalletController) ListWallets(c *gin.Context) {
 	c.JSON(http.StatusOK, wallets)
 }
 
-// CreateWallet -> POST /api/wallets
+// CreateWallet godoc
+// @Summary      Create a wallet
+// @Description  Creates a new occasion wallet for the user.
+// @Tags         wallets
+// @Accept       json
+// @Produce      json
+// @Param        user_id  query     string               false  "User ID"
+// @Param        body     body      CreateWalletRequest  true   "Wallet to create"
+// @Success      201      {object}  model.Wallet
+// @Failure      400      {object}  ErrorResponse
+// @Failure      500      {object}  ErrorResponse
+// @Router       /api/wallets [post]
 func (ctrl *WalletController) CreateWallet(c *gin.Context) {
-	var payload struct {
-		Name   string  `json:"name" binding:"required"`
-		Icon   string  `json:"icon"`
-		Target float64 `json:"target"`
-	}
+	var payload CreateWalletRequest
 
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -64,7 +85,16 @@ func (ctrl *WalletController) CreateWallet(c *gin.Context) {
 	c.JSON(http.StatusCreated, newWallet)
 }
 
-// RemoveOrArchiveWallet -> DELETE /api/wallets/:id
+// RemoveOrArchiveWallet godoc
+// @Summary      Remove or archive a wallet
+// @Description  Archives the wallet (or removes it, depending on its state) for the user.
+// @Tags         wallets
+// @Produce      json
+// @Param        id       path      int     true   "Wallet ID"
+// @Param        user_id  query     string  false  "User ID"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      400      {object}  ErrorResponse
+// @Router       /api/wallets/{id} [delete]
 func (ctrl *WalletController) RemoveOrArchiveWallet(c *gin.Context) {
 	walletIDStr := c.Param("id")
 	walletID, err := strconv.ParseUint(walletIDStr, 10, 32)
@@ -86,6 +116,17 @@ func (ctrl *WalletController) RemoveOrArchiveWallet(c *gin.Context) {
 	})
 }
 
+// SetCurrentWallet godoc
+// @Summary      Set the current wallet
+// @Description  Sets which wallet new transactions should be attributed to.
+// @Tags         wallets
+// @Accept       json
+// @Produce      json
+// @Param        body  body      SetCurrentWalletRequest  true  "Wallet to switch to"
+// @Success      200   {object}  map[string]interface{}
+// @Failure      400   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /api/wallets/current [patch]
 func (c *WalletController) SetCurrentWallet(ctx *gin.Context) {
 	userID := requestUserID(ctx)
 
@@ -118,6 +159,14 @@ func (c *WalletController) SetCurrentWallet(ctx *gin.Context) {
 	})
 }
 
+// GetCurrentWallet godoc
+// @Summary      Get the current wallet
+// @Description  Returns the wallet currently selected for new transactions.
+// @Tags         wallets
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Failure      500  {object}  ErrorResponse
+// @Router       /api/wallets/current [get]
 func (c *WalletController) GetCurrentWallet(ctx *gin.Context) {
 	userID := requestUserID(ctx)
 
