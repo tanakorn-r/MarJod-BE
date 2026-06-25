@@ -1,0 +1,24 @@
+# Git
+.git
+.gitignore
+
+# Secrets — never bake into image
+.env
+.env.*
+!.env.example
+
+# Local build artifacts
+finance-chat
+finance-api
+*.db
+
+# IDE
+.vscode
+.idea
+.kiro
+
+# Docs (regenerated at build time if needed)
+# docs/
+
+# Test files
+*_test.go

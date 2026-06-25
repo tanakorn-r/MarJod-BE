@@ -7,7 +7,8 @@ import "time"
 // so the model learns the user's preferences over time.
 type UserCorrection struct {
 	ID          uint      `json:"id"           gorm:"primaryKey;autoIncrement"`
-	RawMessage  string    `json:"raw_message"`  // original message that was misclassified
+	UserID      string    `json:"user_id"      gorm:"size:128;not null;default:default;index"`
+	RawMessage  string    `json:"raw_message"` // original message that was misclassified
 	Category    string    `json:"category"`
 	SubCategory string    `json:"sub_category"`
 	Brand       string    `json:"brand"`

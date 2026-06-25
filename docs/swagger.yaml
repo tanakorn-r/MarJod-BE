@@ -1,9 +1,27 @@
 basePath: /
 definitions:
+  agent.PipelineResult:
+    properties:
+      alerts:
+        items:
+          $ref: '#/definitions/model.Alert'
+        type: array
+      behavior_dna:
+        $ref: '#/definitions/model.BehaviorDNA'
+      recommendations:
+        items:
+          $ref: '#/definitions/model.Recommendation'
+        type: array
+      transaction:
+        $ref: '#/definitions/model.Transaction'
+    type: object
   controller.ChatRequest:
     properties:
       message:
         example: spent 250 baht on lunch
+        type: string
+      user_id:
+        example: U1234567890
         type: string
     required:
     - message
@@ -63,6 +81,54 @@ definitions:
       userId:
         type: string
     type: object
+  model.Alert:
+    properties:
+      amount:
+        type: number
+      category:
+        type: string
+      category_avg:
+        type: number
+      message:
+        type: string
+      type:
+        description: '"warning", "impulse_flag", "luxury_drift"'
+        type: string
+    type: object
+  model.BehaviorDNA:
+    properties:
+      dominant_category:
+        type: string
+      impulse_frequency:
+        description: count in last 30 days
+        type: integer
+      insufficient_data:
+        description: true if < 5 transactions
+        type: boolean
+      luxury_drift_detected:
+        description: true if drift > 20%
+        type: boolean
+      luxury_drift_index:
+        description: '% change in discretionary spend'
+        type: number
+      top_brands:
+        description: top 3 by frequency
+        items:
+          type: string
+        type: array
+    type: object
+  model.Recommendation:
+    properties:
+      description:
+        type: string
+      estimated_monthly_save:
+        type: number
+      priority:
+        description: '"high", "medium", "low"'
+        type: string
+      title:
+        type: string
+    type: object
   model.Transaction:
     properties:
       amount:
@@ -89,6 +155,10 @@ definitions:
         type: string
       type:
         $ref: '#/definitions/model.TransactionType'
+      user_id:
+        type: string
+      wallet_id:
+        type: integer
     type: object
   model.TransactionType:
     enum:
@@ -115,6 +185,20 @@ definitions:
         type: string
       sub_category:
         type: string
+      user_id:
+        type: string
+    type: object
+  service.AIRecommendation:
+    properties:
+      action:
+        type: string
+      priority:
+        description: '"high", "medium", or "low"'
+        type: string
+      rationale:
+        type: string
+      title:
+        type: string
     type: object
   service.Alert:
     properties:
@@ -126,6 +210,10 @@ definitions:
     type: object
   service.AnalyticsDashboard:
     properties:
+      behavior_breakdown:
+        items:
+          $ref: '#/definitions/service.BehaviorSpending'
+        type: array
       behavior_insights:
         items:
           $ref: '#/definitions/service.BehaviorInsight'
@@ -170,6 +258,28 @@ definitions:
       title:
         type: string
     type: object
+  service.BehaviorSpending:
+    properties:
+      amount:
+        type: number
+      count:
+        type: integer
+      percentage:
+        description: '% of total expense'
+        type: number
+      tag:
+        description: '"impulse", "necessity", "social", "treat", "recurring"'
+        type: string
+    type: object
+  service.BrandSpend:
+    properties:
+      amount:
+        type: number
+      brand:
+        type: string
+      visits:
+        type: integer
+    type: object
   service.CategoryBreakdown:
     properties:
       amount:
@@ -182,6 +292,25 @@ definitions:
         type: integer
       sub_category:
         type: string
+    type: object
+  service.CategoryPage:
+    properties:
+      category:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/model.Transaction'
+        type: array
+      limit:
+        type: integer
+      month:
+        type: string
+      page:
+        type: integer
+      pages:
+        type: integer
+      total:
+        type: integer
     type: object
   service.ComparisonMetric:
     properties:
@@ -212,6 +341,21 @@ definitions:
         description: '"Mon", "Tue", etc.'
         type: string
     type: object
+  service.GameProfileView:
+    properties:
+      level:
+        type: integer
+      level_name:
+        type: string
+      next_level_name:
+        type: string
+      total_xp:
+        type: integer
+      xp_for_next_level:
+        type: integer
+      xp_into_level:
+        type: integer
+    type: object
   service.HighlightedTransaction:
     properties:
       amount:
@@ -240,6 +384,14 @@ definitions:
         description: why it's irregular
         type: string
     type: object
+  service.MonthlyExpensePoint:
+    properties:
+      month:
+        description: '"2026-04"'
+        type: string
+      total_expense:
+        type: number
+    type: object
   service.MonthlySummary:
     properties:
       alert:
@@ -249,10 +401,104 @@ definitions:
       month:
         description: e.g. "April 2025"
         type: string
+      target:
+        type: number
       total_expense:
         type: number
       total_income:
         type: number
+    type: object
+  service.PersonalFinanceInsight:
+    properties:
+      headline:
+        type: string
+      health:
+        description: '"healthy", "watch", or "critical"'
+        type: string
+      key_findings:
+        items:
+          type: string
+        type: array
+      recommendations:
+        items:
+          $ref: '#/definitions/service.AIRecommendation'
+        type: array
+      status:
+        type: string
+      summary:
+        type: string
+    type: object
+  service.QuestBoard:
+    properties:
+      can_reroll:
+        type: boolean
+      profile:
+        $ref: '#/definitions/service.GameProfileView'
+      quests:
+        items:
+          $ref: '#/definitions/service.QuestView'
+        type: array
+      streak:
+        $ref: '#/definitions/service.StreakView'
+    type: object
+  service.QuestView:
+    properties:
+      accent:
+        type: string
+      current:
+        type: number
+      difficulty:
+        type: string
+      done:
+        type: boolean
+      key:
+        type: string
+      target:
+        type: number
+      title:
+        type: string
+      unit:
+        type: string
+      xp:
+        type: integer
+    type: object
+  service.SpendingDNA:
+    properties:
+      archetype:
+        type: string
+      archetype_description:
+        type: string
+      consistency:
+        type: string
+      dominant_category:
+        type: string
+      dominant_category_pct:
+        type: number
+      impulse_control:
+        type: string
+      impulse_frequency_30d:
+        type: integer
+      insufficient_data:
+        type: boolean
+      luxury_drift_detected:
+        type: boolean
+      luxury_drift_index:
+        type: number
+      save_rate:
+        type: number
+      top_brands:
+        items:
+          $ref: '#/definitions/service.BrandSpend'
+        type: array
+      volatility:
+        type: string
+    type: object
+  service.StreakView:
+    properties:
+      best_days:
+        type: integer
+      current_days:
+        type: integer
     type: object
   service.Summary:
     properties:
@@ -266,15 +512,20 @@ definitions:
 host: localhost:8080
 info:
   contact: {}
-  description: Chat-based income/expense tracker powered by Ollama (local LLM).
+  description: Chat-based personal finance tracker powered by OpenAI.
   title: Finance Chat API
   version: "1.0"
 paths:
   /api/analytics:
     get:
-      description: Returns comprehensive analytics including monthly summary, category
-        breakdown, spending patterns, and behavioral insights (AI analysis is mocked
-        for now).
+      description: Returns comprehensive analytics for the given month. Defaults to
+        current month.
+      parameters:
+      - description: Month to analyse (YYYY-MM, e.g. 2026-06). Defaults to current
+          month.
+        in: query
+        name: month
+        type: string
       produces:
       - application/json
       responses:
@@ -282,6 +533,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/service.AnalyticsDashboard'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
@@ -289,12 +544,97 @@ paths:
       summary: Get analytics dashboard data
       tags:
       - analytics
+  /api/analytics/dna:
+    get:
+      description: Computes a real, data-derived behavioral snapshot — archetype,
+        consistency/impulse-control/volatility labels, save rate, dominant category,
+        impulse frequency, luxury drift, and top brands — entirely from real transactions.
+        Not month-scoped; uses trailing 30/60-day windows like the existing behavior
+        profiler.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.SpendingDNA'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Get the user's behavioral spending DNA
+      tags:
+      - analytics
+  /api/analytics/insight:
+    post:
+      description: Explicitly invokes OpenAI using the calculated analytics for the
+        selected month. This endpoint consumes AI tokens; GET /api/analytics does
+        not.
+      parameters:
+      - description: Month to analyse (YYYY-MM, e.g. 2026-06). Defaults to current
+          month.
+        in: query
+        name: month
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.PersonalFinanceInsight'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Generate an AI personal-finance insight
+      tags:
+      - analytics
+  /api/analytics/trend:
+    get:
+      description: Returns just the total expense for each of the last `months` calendar
+        months ending at `month`. Lightweight alternative to calling GET /api/analytics
+        once per month.
+      parameters:
+      - description: Last month in the trend (YYYY-MM, e.g. 2026-06). Defaults to
+          current month.
+        in: query
+        name: month
+        type: string
+      - description: Number of trailing months to include (1-24). Defaults to 6.
+        in: query
+        name: months
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/service.MonthlyExpensePoint'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Get multi-month expense trend
+      tags:
+      - analytics
   /api/chat:
     post:
       consumes:
       - application/json
-      description: Waits for the full LLM response, saves the transaction, and returns
-        it.
+      description: Waits for the full LLM response, runs the agent pipeline, and returns
+        the result with transaction, behavior DNA, alerts, and recommendations.
       parameters:
       - description: Message to parse
         in: body
@@ -308,7 +648,7 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/model.Transaction'
+            $ref: '#/definitions/agent.PipelineResult'
         "400":
           description: Bad Request
           schema:
@@ -326,7 +666,7 @@ paths:
       - application/json
       description: |-
         Streams LLM tokens as Server-Sent Events. Each token is sent as `event: token`.
-        When the model finishes, the saved transaction is sent as `event: done` with JSON body.
+        When the model finishes, the pipeline result (transaction + behavior DNA + alerts + recommendations) is sent as `event: done` with JSON body.
         On error, `event: error` is sent and the stream closes.
       parameters:
       - description: Message to parse
@@ -401,6 +741,48 @@ paths:
       summary: Delete a user correction
       tags:
       - corrections
+  /api/quests:
+    get:
+      description: Returns the user's current quest batch with progress evaluated
+        live from real transactions, plus game profile (level/XP) and streak. Quests
+        are auto-completed and XP is awarded idempotently as soon as their progress
+        condition is met.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.QuestBoard'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Get the user's current quest board
+      tags:
+      - quests
+  /api/quests/reroll:
+    post:
+      description: Picks a new random batch of quest templates. Rejected with 400
+        if the current batch still has an incomplete quest.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.QuestBoard'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: Request a new set of quests
+      tags:
+      - quests
   /api/summary:
     get:
       description: Returns total income, total expense, and current balance.
@@ -532,13 +914,47 @@ paths:
       summary: Correct a transaction's classification
       tags:
       - transactions
+  /api/transactions/by-category:
+    get:
+      description: Returns transactions filtered by category and optional month, sorted
+        by most recent first.
+      parameters:
+      - description: Category name (e.g. Food & Beverage)
+        in: query
+        name: category
+        type: string
+      - description: Month filter YYYY-MM (e.g. 2026-06). Defaults to all months.
+        in: query
+        name: month
+        type: string
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 20, max 100)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.CategoryPage'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      summary: List transactions by category (paginated)
+      tags:
+      - transactions
   /webhook:
     post:
       consumes:
       - application/json
-      description: |-
-        Receives events from Line and replies with AI-parsed transaction info. Always returns 200.
-        To correct the last transaction, send: edit brand=Starbucks sub=Coffee tag=treat
+      description: Receives events from Line and replies with AI-parsed transaction
+        info. Always returns 200.
       parameters:
       - description: Line webhook payload
         in: body

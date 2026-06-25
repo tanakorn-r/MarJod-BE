@@ -20,12 +20,13 @@ func NewBehaviorProfileRepository(db *gorm.DB) BehaviorProfileRepository {
 }
 
 func (r *behaviorProfileRepository) Save(p *model.BehaviorProfile) error {
+	p.UserID = model.UserIDOrDefault(p.UserID)
 	return r.db.Create(p).Error
 }
 
 func (r *behaviorProfileRepository) FindLatestByUserID(userID string) (*model.BehaviorProfile, error) {
 	var profile model.BehaviorProfile
-	err := r.db.Where("user_id = ?", userID).Order("computed_date desc").First(&profile).Error
+	err := r.db.Where("user_id = ?", model.UserIDOrDefault(userID)).Order("computed_date desc").First(&profile).Error
 	if err != nil {
 		return nil, err
 	}

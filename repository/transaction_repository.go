@@ -2,16 +2,20 @@ package repository
 
 import (
 	"finance-chat/model"
+	"time"
 
 	"gorm.io/gorm"
 )
 
 type TransactionRepository interface {
 	Create(t *model.Transaction) error
-	FindAll() ([]model.Transaction, error)
-	FindByID(id uint) (*model.Transaction, error)
+	FindAllByUserID(userID string) ([]model.Transaction, error)
+	FindByID(userID string, id uint) (*model.Transaction, error)
+	FindLatestByUserID(userID string) (*model.Transaction, error)
+	FindTodayByUserID(userID string) ([]model.Transaction, error)
+	FindByCategory(userID, category, month string, page, limit int) ([]model.Transaction, int64, error)
 	Update(t *model.Transaction) error
-	Delete(id uint) error
+	Delete(userID string, id uint) error
 }
 
 type transactionRepository struct {
@@ -23,25 +27,82 @@ func NewTransactionRepository(db *gorm.DB) TransactionRepository {
 }
 
 func (r *transactionRepository) Create(t *model.Transaction) error {
+	t.UserID = model.UserIDOrDefault(t.UserID)
+	if t.WalletID != nil && *t.WalletID == model.GeneralWalletID {
+		zero := uint(0)
+		t.WalletID = &zero
+	}
 	return r.db.Create(t).Error
 }
 
-func (r *transactionRepository) FindAll() ([]model.Transaction, error) {
+func (r *transactionRepository) FindAllByUserID(userID string) ([]model.Transaction, error) {
 	var list []model.Transaction
-	err := r.db.Order("created_at desc").Find(&list).Error
+	err := r.db.Where("user_id = ?", model.UserIDOrDefault(userID)).
+		Order("created_at desc").Find(&list).Error
 	return list, err
 }
 
-func (r *transactionRepository) FindByID(id uint) (*model.Transaction, error) {
+func (r *transactionRepository) FindByID(userID string, id uint) (*model.Transaction, error) {
 	var t model.Transaction
-	err := r.db.First(&t, id).Error
+	err := r.db.Where("user_id = ?", model.UserIDOrDefault(userID)).First(&t, id).Error
 	return &t, err
+}
+
+func (r *transactionRepository) FindLatestByUserID(userID string) (*model.Transaction, error) {
+	var t model.Transaction
+	err := r.db.Where("user_id = ?", model.UserIDOrDefault(userID)).
+		Order("created_at desc").First(&t).Error
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (r *transactionRepository) FindTodayByUserID(userID string) ([]model.Transaction, error) {
+	var list []model.Transaction
+	now := time.Now()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	end := start.Add(24 * time.Hour)
+	err := r.db.Where("user_id = ? AND created_at >= ? AND created_at < ?", model.UserIDOrDefault(userID), start, end).
+		Order("created_at desc").Find(&list).Error
+	return list, err
+}
+
+func (r *transactionRepository) FindByCategory(userID, category, month string, page, limit int) ([]model.Transaction, int64, error) {
+	var list []model.Transaction
+	var total int64
+
+	query := r.db.Model(&model.Transaction{}).Where("user_id = ?", model.UserIDOrDefault(userID))
+
+	if category != "" {
+		query = query.Where("category = ?", category)
+	}
+
+	// Filter by month if provided (format: "2006-01")
+	if month != "" {
+		t, err := time.Parse("2006-01", month)
+		if err == nil {
+			start := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+			end := start.AddDate(0, 1, 0)
+			query = query.Where("created_at >= ? AND created_at < ?", start, end)
+		}
+	}
+
+	// Count total matching rows
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// Paginate, sorted by most recent first
+	offset := (page - 1) * limit
+	err := query.Order("created_at desc").Offset(offset).Limit(limit).Find(&list).Error
+	return list, total, err
 }
 
 func (r *transactionRepository) Update(t *model.Transaction) error {
 	return r.db.Save(t).Error
 }
 
-func (r *transactionRepository) Delete(id uint) error {
-	return r.db.Delete(&model.Transaction{}, id).Error
+func (r *transactionRepository) Delete(userID string, id uint) error {
+	return r.db.Where("user_id = ?", model.UserIDOrDefault(userID)).Delete(&model.Transaction{}, id).Error
 }

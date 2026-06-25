@@ -15,7 +15,7 @@ type BehaviorDNA struct {
 // BehaviorProfile is the GORM model persisted to behavior_profiles table.
 type BehaviorProfile struct {
 	ID           uint      `json:"id"            gorm:"primaryKey;autoIncrement"`
-	UserID       string    `json:"user_id"       gorm:"index"`
+	UserID       string    `json:"user_id"       gorm:"size:128;not null;default:default;index"`
 	ComputedDate time.Time `json:"computed_date"`
 	// BehaviorDNA fields flattened for easy querying
 	DominantCategory    string    `json:"dominant_category"`
