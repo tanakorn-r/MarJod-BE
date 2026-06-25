@@ -18,6 +18,9 @@ type LLMClient interface {
 	// Complete sends a prompt and waits for the full response.
 	Complete(prompt string) (string, error)
 
+	// CompleteWithTokenLimit is like Complete but enforces a hard output token cap.
+	CompleteWithTokenLimit(prompt string, maxTokens int) (string, error)
+
 	// CompleteStream sends a prompt and returns a channel of token strings.
 	// The caller must drain the channel. A non-nil error is sent as the last
 	// value prefixed with "error:" if something goes wrong mid-stream.
@@ -108,11 +111,13 @@ func (p *Pipeline) Run(ctx *AgentContext) (*PipelineResult, error) {
 
 // AgentDeps bundles all external dependencies that agents may need.
 type AgentDeps struct {
-	LLM         LLMClient
+	LLM          LLMClient
+	AnalyticsLLM LLMClient
 	LineService  LineService
-	TxRepo      repository.TransactionRepository
-	ProfileRepo repository.BehaviorProfileRepository
-	PlanRepo    repository.UserPlanRepository
+	TxRepo       repository.TransactionRepository
+	ProfileRepo  repository.BehaviorProfileRepository
+	PlanRepo     repository.UserPlanRepository
+	WalletRepo   repository.WalletRepositoryInterface
 }
 
 // ─────────────────────────────────────────────────────────────

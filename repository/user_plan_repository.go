@@ -24,6 +24,7 @@ func NewUserPlanRepository(db *gorm.DB) UserPlanRepository {
 // FindByUserID returns the user's plan. If no row exists, it returns a default
 // free plan with an expiry far in the future so EffectivePlan() returns PlanFree.
 func (r *userPlanRepository) FindByUserID(userID string) (*model.UserPlan, error) {
+	userID = model.UserIDOrDefault(userID)
 	var plan model.UserPlan
 	err := r.db.Where("user_id = ?", userID).First(&plan).Error
 	if err != nil {
@@ -42,5 +43,6 @@ func (r *userPlanRepository) FindByUserID(userID string) (*model.UserPlan, error
 // Upsert inserts or updates the user's plan record. GORM's Save handles both
 // cases; the uniqueIndex on user_id ensures only one row per user.
 func (r *userPlanRepository) Upsert(p *model.UserPlan) error {
+	p.UserID = model.UserIDOrDefault(p.UserID)
 	return r.db.Save(p).Error
 }

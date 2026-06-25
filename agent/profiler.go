@@ -40,7 +40,7 @@ func ComputeSurpriseScore(amount, avg float64) int {
 		return 0
 	}
 	denom := math.Max(avg, 1)
-	raw := math.Round((amount-avg)/denom*100)
+	raw := math.Round((amount - avg) / denom * 100)
 	if raw < 0 {
 		return 0
 	}
@@ -58,7 +58,8 @@ func ComputeSurpriseScore(amount, avg float64) int {
 //  5. Persist BehaviorProfile.
 //  6. Set ctx.BehaviorDNA and ctx.SurpriseScore.
 func (p *profilerAgent) Run(ctx *AgentContext) (*AgentResult, error) {
-	txs, err := p.deps.TxRepo.FindAll()
+	userID := model.UserIDOrDefault(ctx.LineUserID)
+	txs, err := p.deps.TxRepo.FindAllByUserID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("agent profiler failed: %w", err)
 	}
@@ -187,7 +188,7 @@ func (p *profilerAgent) Run(ctx *AgentContext) (*AgentResult, error) {
 	}
 
 	profile := &model.BehaviorProfile{
-		UserID:              "default",
+		UserID:              userID,
 		ComputedDate:        time.Now(),
 		DominantCategory:    dna.DominantCategory,
 		ImpulseFrequency:    dna.ImpulseFrequency,

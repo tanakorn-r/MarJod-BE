@@ -28,32 +28,41 @@ func (a *auditorAgent) Name() string { return "auditor" }
 //  4. Build a model.Transaction from the parsed result and persist it.
 //  5. Store both the parsed result and the saved transaction in the context.
 func (a *auditorAgent) Run(ctx *AgentContext) (*AgentResult, error) {
-	// 1. Build prompt — the Auditor uses the strict system prompt embedded in prompt.Build()
 	p := prompt.Build(ctx.RawMessage, nil)
 
-	// 2. Call LLM
-	rawResponse, err := a.deps.LLM.Complete(p)
+	rawResponse, err := a.deps.LLM.CompleteWithTokenLimit(p, prompt.MaxOutputTokens)
 	if err != nil {
 		return nil, fmt.Errorf("agent auditor failed: %w", err)
 	}
 
-	// 3. Parse and validate the LLM response
 	parsedResult, err := prompt.Parse(rawResponse)
 	if err != nil {
 		return nil, fmt.Errorf("agent auditor failed: %w", err)
 	}
 
-	// 4. Store parsed result in context
 	ctx.ParsedTx = parsedResult
 
-	// 5. Build transaction model from parsed result
+	normalizedUID := model.UserIDOrDefault(ctx.LineUserID)
+
+	if a.deps.WalletRepo == nil {
+		return nil, fmt.Errorf("agent auditor failed: wallet repository is nil")
+	}
+
+	currentWallet, err := a.deps.WalletRepo.GetCurrentWallet(normalizedUID)
+	if err != nil {
+		return nil, fmt.Errorf("agent auditor failed to get current wallet: %w", err)
+	}
+
 	parsed := parsedResult.ParsedTransaction
+
 	txType := model.TransactionType(parsed.Type)
 	if txType != model.Income && txType != model.Expense {
 		txType = model.Expense
 	}
 
 	tx := &model.Transaction{
+		UserID:      normalizedUID,
+		WalletID:    &currentWallet.ID,
 		RawMessage:  ctx.RawMessage,
 		Type:        txType,
 		Amount:      parsed.Amount,
@@ -64,12 +73,10 @@ func (a *auditorAgent) Run(ctx *AgentContext) (*AgentResult, error) {
 		BehaviorTag: parsed.BehaviorTag,
 	}
 
-	// 6. Persist the transaction
 	if err := a.deps.TxRepo.Create(tx); err != nil {
 		return nil, fmt.Errorf("agent auditor failed: %w", err)
 	}
 
-	// 7. Store saved transaction in context
 	ctx.SavedTx = tx
 
 	return &AgentResult{AgentName: "auditor", Data: ctx.SavedTx}, nil

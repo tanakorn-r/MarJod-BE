@@ -13,7 +13,7 @@ const (
 // UserPlan persists the user's active subscription.
 type UserPlan struct {
 	ID         uint      `json:"id"          gorm:"primaryKey;autoIncrement"`
-	UserID     string    `json:"user_id"     gorm:"uniqueIndex"`
+	UserID     string    `json:"user_id"     gorm:"size:128;not null;default:default;uniqueIndex"`
 	Plan       PlanName  `json:"plan"`
 	StartDate  time.Time `json:"start_date"`
 	ExpiryDate time.Time `json:"expiry_date"`

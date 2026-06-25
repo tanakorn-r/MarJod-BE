@@ -36,7 +36,9 @@ Returns comprehensive analytics data for the dashboard including:
 - Savings/expense comparisons
 - Irregular purchases
 - Spending by day of week
-- Behavioral insights (AI-powered, currently mocked)
+- Rule-based behavioral insights
+
+This endpoint does not call OpenAI and does not consume AI tokens.
 
 **Response Structure:**
 ```json
@@ -112,7 +114,38 @@ Returns comprehensive analytics data for the dashboard including:
 }
 ```
 
-### 3. List All Corrections
+### 3. Generate AI Finance Insight
+
+**POST** `/api/analytics/insight?month=2026-06`
+
+Explicitly calls OpenAI with the calculated dashboard data. Call this endpoint
+only when the user asks to generate or refresh their AI insight.
+
+```json
+{
+  "status": "ready",
+  "health": "watch",
+  "headline": "Spending is close to monthly income",
+  "summary": "Expenses consumed most of this month's income. Food and discretionary purchases are the clearest opportunities to improve cash flow.",
+  "key_findings": [
+    "The savings margin is narrow",
+    "Food & Drink is the largest expense category"
+  ],
+  "recommendations": [
+    {
+      "priority": "high",
+      "title": "Set a weekly food limit",
+      "action": "Cap Food & Drink spending for the rest of the month",
+      "rationale": "It targets the largest controllable expense category"
+    }
+  ]
+}
+```
+
+`status` is `insufficient_data` when the selected month has no transactions and
+`unavailable` when OpenAI cannot be reached.
+
+### 4. List All Corrections
 **GET** `/api/corrections`
 
 Returns all user corrections that have been made. These corrections are used to train the AI to better understand user preferences.
@@ -141,7 +174,7 @@ Returns all user corrections that have been made. These corrections are used to 
 ]
 ```
 
-### 4. Delete a Correction
+### 5. Delete a Correction
 **DELETE** `/api/corrections/:id`
 
 Removes a correction by its ID. This will stop the AI from learning from this example.
@@ -164,8 +197,14 @@ Removes a correction by its ID. This will stop the AI from learning from this ex
 - ✅ Real calculations for: monthly summary, category breakdown, daily spending
 - 🔄 Mock data for: behavioral insights, irregular purchase detection, comparisons
 
-### Future AI Integration
-The following features are currently mocked and should be enhanced with AI analysis:
+### AI Integration
+
+The dashboard aggregates are sent to OpenAI for a concise interpretation. Raw
+transaction messages are intentionally excluded from the AI prompt. The
+generated result explains the current financial picture, highlights important
+patterns and returns prioritized actions.
+
+The following areas can still be enhanced:
 
 1. **Behavioral Insights** (`behavior_insights`)
    - AI should analyze spending patterns daily

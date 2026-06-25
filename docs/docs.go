@@ -17,7 +17,7 @@ const docTemplate = `{
     "paths": {
         "/api/analytics": {
             "get": {
-                "description": "Returns comprehensive analytics including monthly summary, category breakdown, spending patterns, and behavioral insights (AI analysis is mocked for now).",
+                "description": "Returns comprehensive analytics for the given month. Defaults to current month.",
                 "produces": [
                     "application/json"
                 ],
@@ -25,11 +25,140 @@ const docTemplate = `{
                     "analytics"
                 ],
                 "summary": "Get analytics dashboard data",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Month to analyse (YYYY-MM, e.g. 2026-06). Defaults to current month.",
+                        "name": "month",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/service.AnalyticsDashboard"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/analytics/dna": {
+            "get": {
+                "description": "Computes a real, data-derived behavioral snapshot — archetype, consistency/impulse-control/volatility labels, save rate, dominant category, impulse frequency, luxury drift, and top brands — entirely from real transactions. Not month-scoped; uses trailing 30/60-day windows like the existing behavior profiler.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get the user's behavioral spending DNA",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.SpendingDNA"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/analytics/insight": {
+            "post": {
+                "description": "Explicitly invokes OpenAI using the calculated analytics for the selected month. This endpoint consumes AI tokens; GET /api/analytics does not.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Generate an AI personal-finance insight",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Month to analyse (YYYY-MM, e.g. 2026-06). Defaults to current month.",
+                        "name": "month",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.PersonalFinanceInsight"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/analytics/trend": {
+            "get": {
+                "description": "Returns just the total expense for each of the last ` + "`" + `months` + "`" + ` calendar months ending at ` + "`" + `month` + "`" + `. Lightweight alternative to calling GET /api/analytics once per month.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get multi-month expense trend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Last month in the trend (YYYY-MM, e.g. 2026-06). Defaults to current month.",
+                        "name": "month",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Number of trailing months to include (1-24). Defaults to 6.",
+                        "name": "months",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/service.MonthlyExpensePoint"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
                         }
                     },
                     "500": {
@@ -43,7 +172,7 @@ const docTemplate = `{
         },
         "/api/chat": {
             "post": {
-                "description": "Waits for the full LLM response, saves the transaction, and returns it.",
+                "description": "Waits for the full LLM response, runs the agent pipeline, and returns the result with transaction, behavior DNA, alerts, and recommendations.",
                 "consumes": [
                     "application/json"
                 ],
@@ -69,7 +198,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/model.Transaction"
+                            "$ref": "#/definitions/agent.PipelineResult"
                         }
                     },
                     "400": {
@@ -89,7 +218,7 @@ const docTemplate = `{
         },
         "/api/chat/stream": {
             "post": {
-                "description": "Streams LLM tokens as Server-Sent Events. Each token is sent as ` + "`" + `event: token` + "`" + `.\nWhen the model finishes, the saved transaction is sent as ` + "`" + `event: done` + "`" + ` with JSON body.\nOn error, ` + "`" + `event: error` + "`" + ` is sent and the stream closes.",
+                "description": "Streams LLM tokens as Server-Sent Events. Each token is sent as ` + "`" + `event: token` + "`" + `.\nWhen the model finishes, the pipeline result (transaction + behavior DNA + alerts + recommendations) is sent as ` + "`" + `event: done` + "`" + ` with JSON body.\nOn error, ` + "`" + `event: error` + "`" + ` is sent and the stream closes.",
                 "consumes": [
                     "application/json"
                 ],
@@ -203,6 +332,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/quests": {
+            "get": {
+                "description": "Returns the user's current quest batch with progress evaluated live from real transactions, plus game profile (level/XP) and streak. Quests are auto-completed and XP is awarded idempotently as soon as their progress condition is met.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "quests"
+                ],
+                "summary": "Get the user's current quest board",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.QuestBoard"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/quests/reroll": {
+            "post": {
+                "description": "Picks a new random batch of quest templates. Rejected with 400 if the current batch still has an incomplete quest.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "quests"
+                ],
+                "summary": "Request a new set of quests",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.QuestBoard"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/summary": {
             "get": {
                 "description": "Returns total income, total expense, and current balance.",
@@ -247,6 +434,58 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/model.Transaction"
                             }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/transactions/by-category": {
+            "get": {
+                "description": "Returns transactions filtered by category and optional month, sorted by most recent first.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transactions"
+                ],
+                "summary": "List transactions by category (paginated)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category name (e.g. Food \u0026 Beverage)",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Month filter YYYY-MM (e.g. 2026-06). Defaults to all months.",
+                        "name": "month",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default 20, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.CategoryPage"
                         }
                     },
                     "500": {
@@ -402,7 +641,7 @@ const docTemplate = `{
         },
         "/webhook": {
             "post": {
-                "description": "Receives events from Line and replies with AI-parsed transaction info. Always returns 200.\nTo correct the last transaction, send: edit brand=Starbucks sub=Coffee tag=treat",
+                "description": "Receives events from Line and replies with AI-parsed transaction info. Always returns 200.",
                 "consumes": [
                     "application/json"
                 ],
@@ -432,6 +671,29 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "agent.PipelineResult": {
+            "type": "object",
+            "properties": {
+                "alerts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Alert"
+                    }
+                },
+                "behavior_dna": {
+                    "$ref": "#/definitions/model.BehaviorDNA"
+                },
+                "recommendations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Recommendation"
+                    }
+                },
+                "transaction": {
+                    "$ref": "#/definitions/model.Transaction"
+                }
+            }
+        },
         "controller.ChatRequest": {
             "type": "object",
             "required": [
@@ -441,6 +703,10 @@ const docTemplate = `{
                 "message": {
                     "type": "string",
                     "example": "spent 250 baht on lunch"
+                },
+                "user_id": {
+                    "type": "string",
+                    "example": "U1234567890"
                 }
             }
         },
@@ -525,6 +791,76 @@ const docTemplate = `{
                 }
             }
         },
+        "model.Alert": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "category_avg": {
+                    "type": "number"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "\"warning\", \"impulse_flag\", \"luxury_drift\"",
+                    "type": "string"
+                }
+            }
+        },
+        "model.BehaviorDNA": {
+            "type": "object",
+            "properties": {
+                "dominant_category": {
+                    "type": "string"
+                },
+                "impulse_frequency": {
+                    "description": "count in last 30 days",
+                    "type": "integer"
+                },
+                "insufficient_data": {
+                    "description": "true if \u003c 5 transactions",
+                    "type": "boolean"
+                },
+                "luxury_drift_detected": {
+                    "description": "true if drift \u003e 20%",
+                    "type": "boolean"
+                },
+                "luxury_drift_index": {
+                    "description": "% change in discretionary spend",
+                    "type": "number"
+                },
+                "top_brands": {
+                    "description": "top 3 by frequency",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "model.Recommendation": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "estimated_monthly_save": {
+                    "type": "number"
+                },
+                "priority": {
+                    "description": "\"high\", \"medium\", \"low\"",
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
         "model.Transaction": {
             "type": "object",
             "properties": {
@@ -561,6 +897,12 @@ const docTemplate = `{
                 },
                 "type": {
                     "$ref": "#/definitions/model.TransactionType"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "wallet_id": {
+                    "type": "integer"
                 }
             }
         },
@@ -599,6 +941,27 @@ const docTemplate = `{
                 },
                 "sub_category": {
                     "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.AIRecommendation": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "priority": {
+                    "description": "\"high\", \"medium\", or \"low\"",
+                    "type": "string"
+                },
+                "rationale": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
                 }
             }
         },
@@ -617,6 +980,12 @@ const docTemplate = `{
         "service.AnalyticsDashboard": {
             "type": "object",
             "properties": {
+                "behavior_breakdown": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.BehaviorSpending"
+                    }
+                },
                 "behavior_insights": {
                     "type": "array",
                     "items": {
@@ -683,6 +1052,39 @@ const docTemplate = `{
                 }
             }
         },
+        "service.BehaviorSpending": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "percentage": {
+                    "description": "% of total expense",
+                    "type": "number"
+                },
+                "tag": {
+                    "description": "\"impulse\", \"necessity\", \"social\", \"treat\", \"recurring\"",
+                    "type": "string"
+                }
+            }
+        },
+        "service.BrandSpend": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "brand": {
+                    "type": "string"
+                },
+                "visits": {
+                    "type": "integer"
+                }
+            }
+        },
         "service.CategoryBreakdown": {
             "type": "object",
             "properties": {
@@ -700,6 +1102,35 @@ const docTemplate = `{
                 },
                 "sub_category": {
                     "type": "string"
+                }
+            }
+        },
+        "service.CategoryPage": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Transaction"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "month": {
+                    "type": "string"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "pages": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -746,6 +1177,29 @@ const docTemplate = `{
                 }
             }
         },
+        "service.GameProfileView": {
+            "type": "object",
+            "properties": {
+                "level": {
+                    "type": "integer"
+                },
+                "level_name": {
+                    "type": "string"
+                },
+                "next_level_name": {
+                    "type": "string"
+                },
+                "total_xp": {
+                    "type": "integer"
+                },
+                "xp_for_next_level": {
+                    "type": "integer"
+                },
+                "xp_into_level": {
+                    "type": "integer"
+                }
+            }
+        },
         "service.HighlightedTransaction": {
             "type": "object",
             "properties": {
@@ -788,6 +1242,18 @@ const docTemplate = `{
                 }
             }
         },
+        "service.MonthlyExpensePoint": {
+            "type": "object",
+            "properties": {
+                "month": {
+                    "description": "\"2026-04\"",
+                    "type": "string"
+                },
+                "total_expense": {
+                    "type": "number"
+                }
+            }
+        },
         "service.MonthlySummary": {
             "type": "object",
             "properties": {
@@ -801,11 +1267,154 @@ const docTemplate = `{
                     "description": "e.g. \"April 2025\"",
                     "type": "string"
                 },
+                "target": {
+                    "type": "number"
+                },
                 "total_expense": {
                     "type": "number"
                 },
                 "total_income": {
                     "type": "number"
+                }
+            }
+        },
+        "service.PersonalFinanceInsight": {
+            "type": "object",
+            "properties": {
+                "headline": {
+                    "type": "string"
+                },
+                "health": {
+                    "description": "\"healthy\", \"watch\", or \"critical\"",
+                    "type": "string"
+                },
+                "key_findings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "recommendations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.AIRecommendation"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.QuestBoard": {
+            "type": "object",
+            "properties": {
+                "can_reroll": {
+                    "type": "boolean"
+                },
+                "profile": {
+                    "$ref": "#/definitions/service.GameProfileView"
+                },
+                "quests": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.QuestView"
+                    }
+                },
+                "streak": {
+                    "$ref": "#/definitions/service.StreakView"
+                }
+            }
+        },
+        "service.QuestView": {
+            "type": "object",
+            "properties": {
+                "accent": {
+                    "type": "string"
+                },
+                "current": {
+                    "type": "number"
+                },
+                "difficulty": {
+                    "type": "string"
+                },
+                "done": {
+                    "type": "boolean"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "number"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "unit": {
+                    "type": "string"
+                },
+                "xp": {
+                    "type": "integer"
+                }
+            }
+        },
+        "service.SpendingDNA": {
+            "type": "object",
+            "properties": {
+                "archetype": {
+                    "type": "string"
+                },
+                "archetype_description": {
+                    "type": "string"
+                },
+                "consistency": {
+                    "type": "string"
+                },
+                "dominant_category": {
+                    "type": "string"
+                },
+                "dominant_category_pct": {
+                    "type": "number"
+                },
+                "impulse_control": {
+                    "type": "string"
+                },
+                "impulse_frequency_30d": {
+                    "type": "integer"
+                },
+                "insufficient_data": {
+                    "type": "boolean"
+                },
+                "luxury_drift_detected": {
+                    "type": "boolean"
+                },
+                "luxury_drift_index": {
+                    "type": "number"
+                },
+                "save_rate": {
+                    "type": "number"
+                },
+                "top_brands": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.BrandSpend"
+                    }
+                },
+                "volatility": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.StreakView": {
+            "type": "object",
+            "properties": {
+                "best_days": {
+                    "type": "integer"
+                },
+                "current_days": {
+                    "type": "integer"
                 }
             }
         },
@@ -833,7 +1442,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "Finance Chat API",
-	Description:      "Chat-based income/expense tracker powered by Ollama (local LLM).",
+	Description:      "Chat-based personal finance tracker powered by OpenAI.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

@@ -39,41 +39,24 @@ func (s *strategistAgent) Run(ctx *AgentContext) (*AgentResult, error) {
 		return &AgentResult{AgentName: "strategist", Data: ctx.Recommendations}, nil
 	}
 
-	// Case B: Full analysis — build prompt and call LLM
+	// Case B: Full analysis — build compact prompt and call LLM
 	dna := ctx.BehaviorDNA
-	topBrandsStr := strings.Join(dna.TopBrands, ", ")
+	topBrandsStr := strings.Join(dna.TopBrands, ",")
 	if topBrandsStr == "" {
 		topBrandsStr = "none"
 	}
 
-	prompt := fmt.Sprintf(`You are The Strategist. Growth-oriented. Motivational. Focused on net worth.
-
-Based on this user's BehaviorDNA:
-- Dominant Category: %s
-- Impulse Frequency: %d times in last 30 days
-- Luxury Drift Index: %.1f%%
-- Luxury Drift Detected: %t
-- Top Brands: %s
-
-Generate 2-3 actionable financial recommendations. Return ONLY a JSON array:
-[
-  {
-    "title": "string",
-    "description": "string",
-    "estimated_monthly_save": number,
-    "priority": "high"|"medium"|"low"
-  }
-]
-
-Focus on compounding gains and long-term wealth. Be specific with numbers.`,
-		dna.DominantCategory,
-		dna.ImpulseFrequency,
-		dna.LuxuryDriftIndex,
-		dna.LuxuryDriftDetected,
-		topBrandsStr,
+	// Compact prompt — only the data the model needs, no filler
+	llmPrompt := fmt.Sprintf(
+		`Strategist. Return ONLY a JSON array of 2-3 recommendations.
+Schema:[{"title":str,"description":str,"estimated_monthly_save":num,"priority":"high"|"medium"|"low"}]
+BehaviorDNA: dominant=%s impulse=%d luxury_drift=%.1f%% drift_detected=%t top_brands=%s
+Be specific with THB amounts. Focus on compounding savings.`,
+		dna.DominantCategory, dna.ImpulseFrequency,
+		dna.LuxuryDriftIndex, dna.LuxuryDriftDetected, topBrandsStr,
 	)
 
-	// Call LLM with 15-second timeout using goroutine + channel pattern
+	// Call LLM with 15-second timeout and output cap
 	type llmResult struct {
 		response string
 		err      error
@@ -81,7 +64,7 @@ Focus on compounding gains and long-term wealth. Be specific with numbers.`,
 	ch := make(chan llmResult, 1)
 
 	go func() {
-		resp, err := s.deps.LLM.Complete(prompt)
+		resp, err := s.deps.LLM.CompleteWithTokenLimit(llmPrompt, 300)
 		ch <- llmResult{resp, err}
 	}()
 

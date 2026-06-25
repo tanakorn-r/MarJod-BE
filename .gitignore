@@ -32,6 +32,7 @@ go.work
 .env
 .env.local
 .env.*.local
+.env.production
 
 # IDE and editor files
 .vscode/

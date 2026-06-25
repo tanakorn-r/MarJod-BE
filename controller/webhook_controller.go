@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"finance-chat/agent"
 	"finance-chat/model"
+	"finance-chat/repository"
 	"finance-chat/service"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strings"
-	"sync"
 
 	"github.com/gin-gonic/gin"
 )
@@ -42,24 +42,20 @@ type LinePayload struct {
 type WebhookController struct {
 	txSvc   service.TransactionService
 	lineSvc agent.LineService
-
-	// lastTx tracks the most recent transaction per Line userId (in-memory)
-	mu     sync.Mutex
-	lastTx map[string]*model.Transaction
+	txRepo  repository.TransactionRepository
 }
 
-func NewWebhookController(txSvc service.TransactionService, lineSvc agent.LineService) *WebhookController {
+func NewWebhookController(txSvc service.TransactionService, lineSvc agent.LineService, txRepo repository.TransactionRepository) *WebhookController {
 	return &WebhookController{
 		txSvc:   txSvc,
 		lineSvc: lineSvc,
-		lastTx:  make(map[string]*model.Transaction),
+		txRepo:  txRepo,
 	}
 }
 
 // LineWebhook godoc
 // @Summary      Line Messaging API webhook
 // @Description  Receives events from Line and replies with AI-parsed transaction info. Always returns 200.
-// @Description  To correct the last transaction, send: edit brand=Starbucks sub=Coffee tag=treat
 // @Tags         webhook
 // @Accept       json
 // @Produce      json
@@ -81,58 +77,210 @@ func (w *WebhookController) LineWebhook(ctx *gin.Context) {
 	}
 
 	for _, event := range payload.Events {
-		if event.Type == "message" && event.Message.Type == "text" && event.Message.Text != "" {
-			go w.reply(event.ReplyToken, event.Source.UserID, event.Message.Text)
+		if event.Type != "message" ||
+			event.Message.Type != "text" ||
+			event.Message.Text == "" {
+			continue
 		}
+
+		userID := event.Source.UserID
+		if strings.TrimSpace(userID) == "" {
+			log.Println("[webhook] refusing to save transaction without LINE source.userId")
+			ctx.JSON(http.StatusOK, gin.H{"error": "LINE event has no source.userId"})
+			return
+		}
+
+		// Save + classify transaction
+		result, err := w.txSvc.Chat(userID, event.Message.Text)
+		if err != nil {
+			ctx.JSON(http.StatusOK, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		// Today's totals for this user
+		todayIncome, todayExpense := w.getTodayTotals(userID)
+
+		reply := formatTransactionReply(
+			result,
+			todayExpense,
+			todayIncome,
+		)
+
+		// Send back to LINE
+		if event.ReplyToken != "" {
+			_ = w.lineSvc.ReplyMessage(
+				event.ReplyToken,
+				reply,
+			)
+		}
+
+		// Debug response
+		ctx.JSON(http.StatusOK, gin.H{
+			"user_id":       userID,
+			"input":         event.Message.Text,
+			"today_income":  todayIncome,
+			"today_expense": todayExpense,
+			"reply":         reply,
+		})
+
+		return
 	}
 
-	ctx.Status(http.StatusOK)
+	ctx.JSON(http.StatusOK, gin.H{
+		"message": "no text event",
+	})
+}
+func helpMessage() string {
+	return `👋 สวัสดี ผมช่วยจดรายรับรายจ่ายให้ได้
+
+ตัวอย่างที่พิมพ์ได้:
+
+☕ กาแฟ Starbucks 180
+🚕 Grab ไปออฟฟิศ 85
+🍜 ข้าวกลางวัน 60
+💰 เงินเดือน 35000
+
+📊 ดูสรุปวันนี้
+พิมพ์: สรุป
+
+✏️ แก้ไขรายการล่าสุด
+พิมพ์:
+edit brand=Starbucks
+edit sub=Coffee
+edit tag=treat
+
+ลองส่งข้อความมาได้เลย 😊`
 }
 
 func (w *WebhookController) reply(replyToken, userID, text string) {
 	lower := strings.ToLower(strings.TrimSpace(text))
 
-	if lower == "edit" || lower == "แก้ไข" ||
-		strings.HasPrefix(lower, "edit ") || strings.HasPrefix(lower, "แก้ไข ") {
+	// ── Command routing ───────────────────────────────────────
+	switch {
+	case lower == "สรุป" ||
+		lower == "summary" ||
+		lower == "today" ||
+		lower == "วันนี้":
+
+		w.handleDailySummary(replyToken, userID)
+		return
+
+	case lower == "edit" ||
+		lower == "แก้ไข" ||
+		strings.HasPrefix(lower, "edit ") ||
+		strings.HasPrefix(lower, "แก้ไข "):
+
 		w.handleCorrection(replyToken, userID, text)
 		return
-	}
 
-	result, err := w.txSvc.Chat(text)
-	if err != nil {
-		_ = w.lineSvc.ReplyMessage(replyToken, "Sorry, couldn't process that.")
+	case lower == "help" ||
+		lower == "ช่วยด้วย" ||
+		lower == "?":
+
+		_ = w.lineSvc.ReplyMessage(replyToken, helpMessage())
 		return
 	}
 
-	// Extract the transaction from the pipeline result
-	tx := result.Transaction
+	// ── Parse transaction ─────────────────────────────────────
+	result, err := w.txSvc.Chat(userID, text)
+	if err != nil {
+		_ = w.lineSvc.ReplyMessage(
+			replyToken,
+			"❌ ขอโทษนะ ประมวลผลไม่ได้\nSorry, couldn't process that.",
+		)
+		return
+	}
 
-	// Remember last transaction for this user
-	w.mu.Lock()
-	w.lastTx[userID] = tx
-	w.mu.Unlock()
+	// ── Get today's summary ───────────────────────────────────
 
-	_ = w.lineSvc.ReplyMessage(replyToken, formatReply(tx))
+	todayIncome, todayExpense := w.getTodayTotals(userID)
+
+	reply := formatTransactionReply(
+		result,
+		todayExpense,
+		todayIncome,
+	)
+
+	_ = w.lineSvc.ReplyMessage(replyToken, reply)
+}
+func (w *WebhookController) getTodayTotals(userID string) (income, expense float64) {
+	txs, err := w.txRepo.FindTodayByUserID(userID)
+	if err != nil {
+		return 0, 0
+	}
+
+	for _, t := range txs {
+		if t.Type == model.Income {
+			income += t.Amount
+		} else {
+			expense += t.Amount
+		}
+	}
+
+	return
 }
 
-// handleCorrection — no ID needed, always edits the last transaction.
-// Format: edit brand=Starbucks sub=Coffee category=Food & Drink tag=treat
-func (w *WebhookController) handleCorrection(replyToken, userID, text string) {
-	w.mu.Lock()
-	tx := w.lastTx[userID]
-	w.mu.Unlock()
-
-	if tx == nil {
-		_ = w.lineSvc.ReplyMessage(replyToken, "No recent transaction to edit. Send a transaction first.")
+// handleDailySummary replies with today's spending summary
+func (w *WebhookController) handleDailySummary(replyToken, userID string) {
+	txs, err := w.txRepo.FindTodayByUserID(userID)
+	if err != nil || len(txs) == 0 {
+		_ = w.lineSvc.ReplyMessage(replyToken,
+			"📭 ยังไม่มีรายการวันนี้\nNo transactions recorded today yet.")
 		return
 	}
 
-	// Parse key=value pairs from the message
-	// Strip the leading "edit" / "แก้ไข" word first
+	var totalIncome, totalExpense float64
+	var expenseLines strings.Builder
+
+	for _, t := range txs {
+		if t.Type == model.Income {
+			totalIncome += t.Amount
+		} else {
+			totalExpense += t.Amount
+			icon := categoryIcon(t.Category)
+			expenseLines.WriteString(fmt.Sprintf("  %s %s  ฿%.0f\n", icon, t.Description, t.Amount))
+		}
+	}
+
+	balance := totalIncome - totalExpense
+	balanceIcon := "💚"
+	if balance < 0 {
+		balanceIcon = "🔴"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("📅 สรุปวันนี้ · Today's Summary\n")
+	if expenseLines.Len() > 0 {
+		sb.WriteString("\n💸 รายจ่าย · Expenses:\n")
+		sb.WriteString(expenseLines.String())
+	}
+	if totalIncome > 0 {
+		sb.WriteString(fmt.Sprintf("\n💰 รายรับ · Income:  ฿%.0f\n", totalIncome))
+	}
+	sb.WriteString(fmt.Sprintf("💸 รายจ่ายรวม  ฿%.0f\n", totalExpense))
+	if totalIncome > 0 {
+		sb.WriteString(fmt.Sprintf("💰 รายรับรวม   ฿%.0f\n", totalIncome))
+	}
+	sb.WriteString(fmt.Sprintf("%s คงเหลือ       ฿%.0f\n", balanceIcon, balance))
+
+	_ = w.lineSvc.ReplyMessage(replyToken, sb.String())
+}
+
+// handleCorrection edits the most recent transaction
+func (w *WebhookController) handleCorrection(replyToken, userID, text string) {
+	tx, err := w.txRepo.FindLatestByUserID(userID)
+	if err != nil || tx == nil {
+		_ = w.lineSvc.ReplyMessage(replyToken,
+			"❓ ไม่พบรายการล่าสุด\nNo recent transaction to edit. Send a transaction first.")
+		return
+	}
+
 	parts := strings.Fields(text)
 	if len(parts) < 2 {
 		_ = w.lineSvc.ReplyMessage(replyToken,
-			"What would you like to fix?\nExample: edit brand=Starbucks sub=Coffee tag=treat")
+			"✏️ แก้ไขอย่างไร?\nExample: edit brand=Starbucks sub=Coffee tag=treat")
 		return
 	}
 
@@ -149,26 +297,135 @@ func (w *WebhookController) handleCorrection(replyToken, userID, text string) {
 		}
 	}
 
-	if err := w.txSvc.Correct(tx.ID, category, sub, brand, tag); err != nil {
-		_ = w.lineSvc.ReplyMessage(replyToken, fmt.Sprintf("Correction failed: %v", err))
+	if err := w.txSvc.Correct(userID, tx.ID, category, sub, brand, tag); err != nil {
+		_ = w.lineSvc.ReplyMessage(replyToken, fmt.Sprintf("❌ แก้ไขไม่ได้: %v", err))
 		return
 	}
 
-	_ = w.lineSvc.ReplyMessage(replyToken, "✅ Got it, I'll remember that for next time.")
+	_ = w.lineSvc.ReplyMessage(replyToken, "✅ แก้ไขแล้ว! จำไว้สำหรับครั้งหน้า\nGot it, I'll remember that!")
 }
 
-func formatReply(tx *model.Transaction) string {
-	emoji := "💸"
+// ─────────────────────────────────────────────────────────────
+// Formatters
+// ─────────────────────────────────────────────────────────────
+
+func formatTransactionReply(
+	result *agent.PipelineResult,
+	todayExpense float64,
+	todayIncome float64,
+) string {
+
+	tx := result.Transaction
+	if tx == nil {
+		return "❌ ไม่สามารถบันทึกรายการได้"
+	}
+
+	var sb strings.Builder
+
+	// Header
 	if tx.Type == model.Income {
-		emoji = "💰"
+		sb.WriteString("💰 รับทราบรายรับ\n\n")
+	} else {
+		sb.WriteString("📒 จดให้แล้ว\n\n")
 	}
-	brand := tx.Brand
-	if brand == "" {
-		brand = "-"
+
+	// Display name
+	name := tx.Brand
+
+	switch {
+	case tx.Brand != "" &&
+		tx.Brand != "Unknown" &&
+		tx.Brand != "General":
+		name = tx.Brand
+
+	case tx.Description != "":
+		name = tx.Description
+
+	case tx.SubCategory != "":
+		name = tx.SubCategory
+
+	default:
+		name = tx.Category
 	}
-	return fmt.Sprintf(
-		"%s %s\nAmount: %.2f\nCategory: %s\nSub: %s\nBrand: %s\nBehavior: %s\nNote: %s\n\nWrong? Reply: edit brand=X sub=X tag=X",
-		emoji, tx.Type, tx.Amount,
-		tx.Category, tx.SubCategory, brand, tx.BehaviorTag, tx.Description,
-	)
+
+	sb.WriteString(fmt.Sprintf("%s %s\n",
+		categoryIcon(tx.Category),
+		name,
+	))
+
+	sb.WriteString(fmt.Sprintf("฿%.0f\n", tx.Amount))
+
+	// Daily summary
+	if tx.Type == model.Income {
+		sb.WriteString(
+			fmt.Sprintf("\n💰 รายรับวันนี้ ฿%.0f\n", todayIncome),
+		)
+
+		sb.WriteString(
+			fmt.Sprintf("💸 รายจ่ายวันนี้ ฿%.0f\n", todayExpense),
+		)
+
+		sb.WriteString(
+			fmt.Sprintf("✨ คงเหลือ ฿%.0f\n",
+				todayIncome-todayExpense,
+			),
+		)
+	} else {
+		sb.WriteString(
+			fmt.Sprintf("\n💸 วันนี้ใช้ไปแล้ว ฿%.0f\n",
+				todayExpense,
+			),
+		)
+	}
+
+	// Alert
+	if len(result.Alerts) > 0 {
+		sb.WriteString("\n⚠️ ")
+		sb.WriteString(result.Alerts[0].Message)
+		sb.WriteString("\n")
+	}
+
+	// Recommendation
+	if len(result.Recommendations) > 0 {
+		sb.WriteString("\n💡 ")
+		sb.WriteString(result.Recommendations[0].Title)
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// ─────────────────────────────────────────────────────────────
+// Icon helpers
+// ─────────────────────────────────────────────────────────────
+
+func categoryIcon(category string) string {
+	icons := map[string]string{
+		"Food & Beverage": "🍜",
+		"Transport":       "🚗",
+		"Shopping":        "🛍",
+		"Bill":            "📄",
+		"Health":          "💊",
+		"Entertainment":   "🎮",
+		"Salary & Income": "💼",
+		"Other":           "📦",
+	}
+	if icon, ok := icons[category]; ok {
+		return icon
+	}
+	return "📦"
+}
+
+func behaviorTagIcon(tag string) string {
+	icons := map[string]string{
+		"impulse":   "⚡",
+		"necessity": "✅",
+		"social":    "👥",
+		"treat":     "🎁",
+		"recurring": "🔄",
+	}
+	if icon, ok := icons[tag]; ok {
+		return icon
+	}
+	return "🏷"
 }

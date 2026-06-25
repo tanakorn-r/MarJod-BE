@@ -2,11 +2,13 @@ package controller
 
 import (
 	"encoding/json"
+	"finance-chat/model"
 	"finance-chat/service"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,7 +23,18 @@ func NewTransactionController(svc service.TransactionService) *TransactionContro
 
 // ChatRequest represents the chat input
 type ChatRequest struct {
+	UserID  string `json:"user_id" example:"U1234567890"`
 	Message string `json:"message" binding:"required" example:"spent 250 baht on lunch"`
+}
+
+// requestUserID accepts the user identity from a query parameter or header.
+// "default" preserves access to records created before per-user storage.
+func requestUserID(ctx *gin.Context) string {
+	userID := ctx.Query("user_id")
+	if userID == "" {
+		userID = ctx.GetHeader("X-User-ID")
+	}
+	return model.UserIDOrDefault(userID)
 }
 
 // ErrorResponse represents an error payload
@@ -47,7 +60,7 @@ func (c *TransactionController) Chat(ctx *gin.Context) {
 		return
 	}
 
-	result, err := c.svc.Chat(req.Message)
+	result, err := c.svc.Chat(model.UserIDOrDefault(req.UserID), req.Message)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
@@ -76,7 +89,7 @@ func (c *TransactionController) ChatStream(ctx *gin.Context) {
 		return
 	}
 
-	tokens, done, errc := c.svc.ChatStream(req.Message)
+	tokens, done, errc := c.svc.ChatStream(model.UserIDOrDefault(req.UserID), req.Message)
 
 	ctx.Header("Content-Type", "text/event-stream")
 	ctx.Header("Cache-Control", "no-cache")
@@ -148,12 +161,45 @@ func (c *TransactionController) Correct(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.svc.Correct(uint(id), req.Category, req.SubCategory, req.Brand, req.BehaviorTag); err != nil {
+	if err := c.svc.Correct(requestUserID(ctx), uint(id), req.Category, req.SubCategory, req.Brand, req.BehaviorTag); err != nil {
 		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "correction saved"})
+}
+
+// ListByCategory godoc
+// @Summary      List transactions by category (paginated)
+// @Description  Returns transactions filtered by category and optional month, sorted by most recent first.
+// @Tags         transactions
+// @Produce      json
+// @Param        category  query     string  false  "Category name (e.g. Food & Beverage)"
+// @Param        month     query     string  false  "Month filter YYYY-MM (e.g. 2026-06). Defaults to all months."
+// @Param        page      query     int     false  "Page number (default 1)"
+// @Param        limit     query     int     false  "Items per page (default 20, max 100)"
+// @Success      200       {object}  service.CategoryPage
+// @Failure      500       {object}  ErrorResponse
+// @Router       /api/transactions/by-category [get]
+func (c *TransactionController) ListByCategory(ctx *gin.Context) {
+	category := ctx.Query("category")
+	month := ctx.Query("month")
+
+	page := 1
+	if p, err := strconv.Atoi(ctx.Query("page")); err == nil && p > 0 {
+		page = p
+	}
+	limit := 20
+	if l, err := strconv.Atoi(ctx.Query("limit")); err == nil && l > 0 {
+		limit = l
+	}
+
+	result, err := c.svc.ListByCategory(requestUserID(ctx), category, month, page, limit)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, result)
 }
 
 // List godoc
@@ -165,7 +211,7 @@ func (c *TransactionController) Correct(ctx *gin.Context) {
 // @Failure      500  {object}  ErrorResponse
 // @Router       /api/transactions [get]
 func (c *TransactionController) List(ctx *gin.Context) {
-	list, err := c.svc.List()
+	list, err := c.svc.List(requestUserID(ctx))
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
@@ -190,7 +236,7 @@ func (c *TransactionController) Delete(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.svc.Delete(uint(id)); err != nil {
+	if err := c.svc.Delete(requestUserID(ctx), uint(id)); err != nil {
 		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
@@ -207,7 +253,7 @@ func (c *TransactionController) Delete(ctx *gin.Context) {
 // @Failure      500  {object}  ErrorResponse
 // @Router       /api/summary [get]
 func (c *TransactionController) Summary(ctx *gin.Context) {
-	sum, err := c.svc.Summary()
+	sum, err := c.svc.Summary(requestUserID(ctx))
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
@@ -233,7 +279,7 @@ func (c *TransactionController) GetByID(ctx *gin.Context) {
 		return
 	}
 
-	tx, err := c.svc.GetByID(uint(id))
+	tx, err := c.svc.GetByID(requestUserID(ctx), uint(id))
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, ErrorResponse{Error: "transaction not found"})
 		return
@@ -244,19 +290,148 @@ func (c *TransactionController) GetByID(ctx *gin.Context) {
 
 // Analytics godoc
 // @Summary      Get analytics dashboard data
-// @Description  Returns comprehensive analytics including monthly summary, category breakdown, spending patterns, and behavioral insights (AI analysis is mocked for now).
+// @Description  Returns comprehensive analytics for the given month. Defaults to current month.
 // @Tags         analytics
 // @Produce      json
-// @Success      200  {object}  service.AnalyticsDashboard
-// @Failure      500  {object}  ErrorResponse
+// @Param        month  query     string  false  "Month to analyse (YYYY-MM, e.g. 2026-06). Defaults to current month."
+// @Success      200    {object}  service.AnalyticsDashboard
+// @Failure      400    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
 // @Router       /api/analytics [get]
 func (c *TransactionController) Analytics(ctx *gin.Context) {
-	analytics, err := c.svc.GetAnalytics()
+	month, err := parseMonthParam(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	// 1. Extract the wallet_id query parameter (e.g., ?wallet_id=12)
+	var walletID uint
+	walletIDStr := ctx.Query("wallet_id")
+	if walletIDStr != "" {
+		// Parse the string into a uint
+		var id uint64
+		id, err = strconv.ParseUint(walletIDStr, 10, 32)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid wallet_id format"})
+			return
+		}
+		walletID = uint(id)
+	}
+
+	// 2. Pass walletID as the third argument
+	analytics, err := c.svc.GetAnalytics(requestUserID(ctx), month, walletID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, analytics)
+}
+
+// AnalyticsTrend godoc
+// @Summary      Get multi-month expense trend
+// @Description  Returns just the total expense for each of the last `months` calendar months ending at `month`. Lightweight alternative to calling GET /api/analytics once per month.
+// @Tags         analytics
+// @Produce      json
+// @Param        month   query     string  false  "Last month in the trend (YYYY-MM, e.g. 2026-06). Defaults to current month."
+// @Param        months  query     int     false  "Number of trailing months to include (1-24). Defaults to 6."
+// @Success      200     {array}   service.MonthlyExpensePoint
+// @Failure      400     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /api/analytics/trend [get]
+func (c *TransactionController) AnalyticsTrend(ctx *gin.Context) {
+	month, err := parseMonthParam(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	months := 6
+	if raw := ctx.Query("months"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 24 {
+			ctx.JSON(http.StatusBadRequest, ErrorResponse{Error: "months must be an integer between 1 and 24"})
+			return
+		}
+		months = n
+	}
+
+	trend, err := c.svc.GetExpenseTrend(requestUserID(ctx), month, months)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, trend)
+}
+
+// SpendingDNA godoc
+// @Summary      Get the user's behavioral spending DNA
+// @Description  Computes a real, data-derived behavioral snapshot — archetype, consistency/impulse-control/volatility labels, save rate, dominant category, impulse frequency, luxury drift, and top brands — entirely from real transactions. Not month-scoped; uses trailing 30/60-day windows like the existing behavior profiler.
+// @Tags         analytics
+// @Produce      json
+// @Success      200  {object}  service.SpendingDNA
+// @Failure      500  {object}  ErrorResponse
+// @Router       /api/analytics/dna [get]
+func (c *TransactionController) SpendingDNA(ctx *gin.Context) {
+	dna, err := c.svc.GetSpendingDNA(requestUserID(ctx))
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, dna)
+}
+
+// AnalyticsInsight godoc
+// @Summary      Generate an AI personal-finance insight
+// @Description  Explicitly invokes OpenAI using the calculated analytics for the selected month. This endpoint consumes AI tokens; GET /api/analytics does not.
+// @Tags         analytics
+// @Produce      json
+// @Param        month  query     string  false  "Month to analyse (YYYY-MM, e.g. 2026-06). Defaults to current month."
+// @Success      200    {object}  service.PersonalFinanceInsight
+// @Failure      400    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /api/analytics/insight [post]
+func (c *TransactionController) AnalyticsInsight(ctx *gin.Context) {
+	month, err := parseMonthParam(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	// 1. Extract the wallet_id query parameter (e.g., ?wallet_id=12)
+	var walletID uint
+	walletIDStr := ctx.Query("wallet_id")
+	if walletIDStr != "" {
+		var id uint64
+		id, err = strconv.ParseUint(walletIDStr, 10, 32)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid wallet_id format"})
+			return
+		}
+		walletID = uint(id)
+	}
+
+	// 2. Pass walletID down as the third argument
+	insight, err := c.svc.GetAnalyticsInsight(requestUserID(ctx), month, walletID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, insight)
+}
+
+// parseMonthParam reads ?month=YYYY-MM from the query string.
+// Returns time.Now() when the param is absent, 400 when it's malformed.
+func parseMonthParam(ctx *gin.Context) (time.Time, error) {
+	raw := ctx.Query("month")
+	if raw == "" {
+		return time.Now(), nil
+	}
+	t, err := time.Parse("2006-01", raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid month format %q — use YYYY-MM (e.g. 2026-06)", raw)
+	}
+	return t, nil
 }
 
 // ListCorrections godoc
@@ -268,7 +443,7 @@ func (c *TransactionController) Analytics(ctx *gin.Context) {
 // @Failure      500  {object}  ErrorResponse
 // @Router       /api/corrections [get]
 func (c *TransactionController) ListCorrections(ctx *gin.Context) {
-	corrections, err := c.svc.ListCorrections()
+	corrections, err := c.svc.ListCorrections(requestUserID(ctx))
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
@@ -293,7 +468,7 @@ func (c *TransactionController) DeleteCorrection(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.svc.DeleteCorrection(uint(id)); err != nil {
+	if err := c.svc.DeleteCorrection(requestUserID(ctx), uint(id)); err != nil {
 		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
