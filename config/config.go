@@ -20,6 +20,16 @@ type Config struct {
 	CORSOrigins          []string
 	LineChannelToken     string
 	LineChannelSecret    string
+	LineLiffChannelID    string
+
+	// AuthDevBypass skips LIFF ID-token verification entirely when true,
+	// resolving every request to AuthDevUserID instead. LIFF login can't
+	// complete on localhost (LINE only redirects back to the LIFF app's
+	// registered Endpoint URL), so this is the only way to run the frontend
+	// against a local backend during development. Must NEVER be set in any
+	// deployed environment — there's no production env file with it set.
+	AuthDevBypass bool
+	AuthDevUserID string
 }
 
 var (
@@ -50,6 +60,13 @@ func Get() *Config {
 			CORSOrigins:          strings.Split(getEnv("CORS_ORIGINS", "http://localhost:5173"), ","),
 			LineChannelToken:     getEnv("LINE_CHANNEL_TOKEN", ""),
 			LineChannelSecret:    getEnv("LINE_CHANNEL_SECRET", ""),
+			LineLiffChannelID:    getEnv("LINE_LIFF_CHANNEL_ID", ""),
+			AuthDevBypass:        getEnv("AUTH_DEV_BYPASS", "") == "true",
+			AuthDevUserID:        getEnv("AUTH_DEV_USER_ID", "default"),
+		}
+
+		if instance.AuthDevBypass {
+			log.Printf("[config] AUTH_DEV_BYPASS=true — LIFF auth is DISABLED, every request resolves to user %q. Never set this in production.", instance.AuthDevUserID)
 		}
 	})
 	return instance

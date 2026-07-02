@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"time"
 
 	"finance-chat/model"
+	"finance-chat/timeutil"
 )
 
 // discretionaryCategories defines the categories used for luxury drift calculation.
@@ -70,7 +70,7 @@ func (p *profilerAgent) Run(ctx *AgentContext) (*AgentResult, error) {
 		return &AgentResult{AgentName: "profiler", Data: ctx.BehaviorDNA}, nil
 	}
 
-	now := time.Now()
+	now := timeutil.Now()
 	thirtyDaysAgo := now.AddDate(0, 0, -30)
 	sixtyDaysAgo := now.AddDate(0, 0, -60)
 
@@ -189,7 +189,7 @@ func (p *profilerAgent) Run(ctx *AgentContext) (*AgentResult, error) {
 
 	profile := &model.BehaviorProfile{
 		UserID:              userID,
-		ComputedDate:        time.Now(),
+		ComputedDate:        timeutil.Now(),
 		DominantCategory:    dna.DominantCategory,
 		ImpulseFrequency:    dna.ImpulseFrequency,
 		LuxuryDriftIndex:    dna.LuxuryDriftIndex,

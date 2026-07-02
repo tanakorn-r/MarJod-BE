@@ -2,6 +2,7 @@ package service
 
 import (
 	"finance-chat/model"
+	"finance-chat/timeutil"
 	"math"
 	"sort"
 	"strings"
@@ -41,17 +42,28 @@ type SpendingDNA struct {
 	InsufficientData     bool         `json:"insufficient_data"`
 }
 
-func (s *transactionService) GetSpendingDNA(userID string) (*SpendingDNA, error) {
+func (s *transactionService) GetSpendingDNA(userID string, walletID ...uint) (*SpendingDNA, error) {
 	userID = model.UserIDOrDefault(userID)
 	list, err := s.repo.FindAllByUserID(userID)
 	if err != nil {
 		return nil, err
 	}
+	if len(walletID) > 0 {
+		effectiveWalletID := walletID[0]
+		if walletID[0] == model.GeneralWalletID {
+			wallet, err := s.walletRepo.GetWalletByID(userID, walletID[0])
+			if err != nil {
+				return nil, err
+			}
+			effectiveWalletID = wallet.ID
+		}
+		list = filterByWallet(list, effectiveWalletID)
+	}
 	if len(list) < 5 {
 		return &SpendingDNA{InsufficientData: true}, nil
 	}
 
-	now := time.Now()
+	now := timeutil.Now()
 	thirtyAgo := now.AddDate(0, 0, -30)
 	sixtyAgo := now.AddDate(0, 0, -60)
 
@@ -121,7 +133,7 @@ func behaviorTagPercentages(txs []model.Transaction) map[string]float64 {
 func consistencyLabel(txs []model.Transaction, from, to time.Time) string {
 	days := map[string]bool{}
 	for _, t := range txs {
-		days[t.CreatedAt.Format("2006-01-02")] = true
+		days[timeutil.DateKey(t.CreatedAt)] = true
 	}
 	totalDays := int(math.Round(to.Sub(from).Hours() / 24))
 	if totalDays <= 0 {
@@ -157,11 +169,11 @@ func dailyExpenseSeries(txs []model.Transaction, from, to time.Time) []float64 {
 		if t.Type != model.Expense {
 			continue
 		}
-		byDay[t.CreatedAt.Format("2006-01-02")] += t.Amount
+		byDay[timeutil.DateKey(t.CreatedAt)] += t.Amount
 	}
 	var series []float64
 	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
-		series = append(series, byDay[d.Format("2006-01-02")])
+		series = append(series, byDay[timeutil.DateKey(d)])
 	}
 	return series
 }

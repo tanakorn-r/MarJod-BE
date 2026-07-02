@@ -5,18 +5,24 @@ import (
 	"finance-chat/agent"
 	"finance-chat/model"
 	"finance-chat/repository"
+	"finance-chat/timeutil"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
+type QuestProgressEvaluator interface {
+	EvaluateActiveQuests(userID string) error
+}
+
 type TransactionService interface {
 	Chat(userID string, message string) (*agent.PipelineResult, error)
 	ChatStream(userID, message string) (<-chan string, <-chan *agent.PipelineResult, <-chan error)
 	Correct(userID string, transactionID uint, category, subCategory, brand, behaviorTag string) error
-	List(userID string) ([]model.Transaction, error)
+	List(userID string, walletID ...uint) ([]model.Transaction, error)
 	ListByCategory(userID, category, month string, page, limit int) (*CategoryPage, error)
 	GetByID(userID string, id uint) (*model.Transaction, error)
 	Delete(userID string, id uint) error
@@ -24,12 +30,13 @@ type TransactionService interface {
 	GetExpenseTrend(userID string, month time.Time, months int) ([]MonthlyExpensePoint, error)
 	GetAnalytics(userID string, month time.Time, walletID uint) (*AnalyticsDashboard, error)
 	GetAnalyticsInsight(userID string, month time.Time, walletID uint) (*PersonalFinanceInsight, error)
-	GetSpendingDNA(userID string) (*SpendingDNA, error)
+	GetSpendingDNA(userID string, walletID ...uint) (*SpendingDNA, error)
 	ListCorrections(userID string) ([]model.UserCorrection, error)
 	DeleteCorrection(userID string, id uint) error
 
 	SetCurrentWallet(userID string, walletID uint) error
 	GetCurrentWallet(userID string) (*model.Wallet, error)
+	SetQuestProgressEvaluator(evaluator QuestProgressEvaluator)
 }
 
 type Summary struct {
@@ -156,6 +163,7 @@ type transactionService struct {
 	planRepo    repository.UserPlanRepository
 	walletRepo  repository.WalletRepositoryInterface
 	agentDeps   agent.AgentDeps
+	questEval   QuestProgressEvaluator
 }
 
 var (
@@ -206,6 +214,10 @@ func NewTransactionServiceDirect(
 		walletRepo:  walletRepo,
 		agentDeps:   agentDeps,
 	}
+}
+
+func (s *transactionService) SetQuestProgressEvaluator(evaluator QuestProgressEvaluator) {
+	s.questEval = evaluator
 }
 
 func (s *transactionService) SetCurrentWallet(userID string, walletID uint) error {
@@ -265,7 +277,24 @@ func (s *transactionService) Chat(
 		return nil, err
 	}
 
+	if result != nil && result.Transaction != nil && result.Transaction.ID != 0 {
+		s.evaluateQuestsAsync(userID)
+	}
+
 	return result, nil
+}
+
+func (s *transactionService) evaluateQuestsAsync(userID string) {
+	evaluator := s.questEval
+	if evaluator == nil {
+		return
+	}
+
+	go func() {
+		if err := evaluator.EvaluateActiveQuests(userID); err != nil {
+			log.Printf("async quest evaluation failed: %v", err)
+		}
+	}()
 }
 
 func (s *transactionService) ChatStream(userID, message string) (<-chan string, <-chan *agent.PipelineResult, <-chan error) {
@@ -331,8 +360,25 @@ func (s *transactionService) Correct(userID string, transactionID uint, category
 	return s.correction.Save(c)
 }
 
-func (s *transactionService) List(userID string) ([]model.Transaction, error) {
-	return s.repo.FindAllByUserID(userID)
+func (s *transactionService) List(userID string, walletID ...uint) ([]model.Transaction, error) {
+	userID = model.UserIDOrDefault(userID)
+	list, err := s.repo.FindAllByUserID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(walletID) == 0 {
+		return list, nil
+	}
+
+	effectiveWalletID := walletID[0]
+	if walletID[0] == model.GeneralWalletID {
+		wallet, err := s.walletRepo.GetWalletByID(userID, walletID[0])
+		if err != nil {
+			return nil, err
+		}
+		effectiveWalletID = wallet.ID
+	}
+	return filterByWallet(list, effectiveWalletID), nil
 }
 
 func (s *transactionService) Delete(userID string, id uint) error {
@@ -364,20 +410,27 @@ func (s *transactionService) GetByID(userID string, id uint) (*model.Transaction
 // Add walletID uint here
 func (s *transactionService) GetAnalytics(userID string, month time.Time, walletID uint) (*AnalyticsDashboard, error) {
 	userID = model.UserIDOrDefault(userID)
+	month = timeutil.InThailand(month)
 	list, err := s.repo.FindAllByUserID(userID)
 	if err != nil {
 		return nil, err
 	}
-	list = filterByWallet(list, walletID)
+	wallet, err := s.walletRepo.GetWalletByID(userID, walletID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get wallet: %w", err)
+	}
+
+	effectiveWalletID := walletID
+	if walletID == model.GeneralWalletID {
+		effectiveWalletID = wallet.ID
+	}
+
+	list = filterByWallet(list, effectiveWalletID)
 	filtered := filterByMonth(list, month)
 	prevMonth := month.AddDate(0, -1, 0)
 	prevFiltered := filterByMonth(list, prevMonth)
 
 	profile, _ := s.profileRepo.FindLatestByUserID(userID)
-	wallet, err := s.walletRepo.GetWalletByID(userID, walletID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get wallet: %w", err)
-	}
 	dashboard := &AnalyticsDashboard{
 		MonthlySummary:      s.calculateMonthlySummary(filtered, month, *wallet),
 		RecentHighlights:    s.getRecentHighlights(filtered),
@@ -398,29 +451,31 @@ func (s *transactionService) GetAnalytics(userID string, month time.Time, wallet
 // in-memory grouping, not `months` separate full-dashboard computations.
 func (s *transactionService) GetExpenseTrend(userID string, month time.Time, months int) ([]MonthlyExpensePoint, error) {
 	userID = model.UserIDOrDefault(userID)
+	month = timeutil.InThailand(month)
 	list, err := s.repo.FindAllByUserID(userID)
 	if err != nil {
 		return nil, err
 	}
 
-	oldest := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, month.Location()).AddDate(0, -(months - 1), 0)
+	oldest := timeutil.StartOfMonth(month).AddDate(0, -(months - 1), 0)
 
 	totals := make(map[string]float64, months)
 	for _, t := range list {
 		if t.Type != model.Expense {
 			continue
 		}
-		if t.CreatedAt.Before(oldest) {
+		createdAt := timeutil.InThailand(t.CreatedAt)
+		if createdAt.Before(oldest) {
 			continue
 		}
-		key := t.CreatedAt.Format("2006-01")
+		key := timeutil.MonthKey(createdAt)
 		totals[key] += t.Amount
 	}
 
 	points := make([]MonthlyExpensePoint, months)
 	for i := 0; i < months; i++ {
-		m := month.AddDate(0, -(months - 1 - i), 0)
-		key := m.Format("2006-01")
+		m := timeutil.StartOfMonth(month).AddDate(0, -(months - 1 - i), 0)
+		key := timeutil.MonthKey(m)
 		points[i] = MonthlyExpensePoint{Month: key, TotalExpense: totals[key]}
 	}
 	return points, nil
@@ -547,9 +602,11 @@ func filterByWallet(transactions []model.Transaction, walletID uint) []model.Tra
 // filterByMonth returns only transactions whose CreatedAt falls in the same
 // calendar month and year as ref.
 func filterByMonth(transactions []model.Transaction, ref time.Time) []model.Transaction {
+	ref = timeutil.InThailand(ref)
 	var out []model.Transaction
 	for _, t := range transactions {
-		if t.CreatedAt.Month() == ref.Month() && t.CreatedAt.Year() == ref.Year() {
+		createdAt := timeutil.InThailand(t.CreatedAt)
+		if createdAt.Month() == ref.Month() && createdAt.Year() == ref.Year() {
 			out = append(out, t)
 		}
 	}
@@ -557,6 +614,7 @@ func filterByMonth(transactions []model.Transaction, ref time.Time) []model.Tran
 }
 
 func (s *transactionService) calculateMonthlySummary(transactions []model.Transaction, month time.Time, wallet model.Wallet) MonthlySummary {
+	month = timeutil.InThailand(month)
 	var totalIncome, totalExpense float64
 	for _, t := range transactions {
 		if t.Type == model.Income {
@@ -617,7 +675,7 @@ func (s *transactionService) calculateDailySpending(transactions []model.Transac
 	dailyMap := make(map[string]*DailySpending)
 
 	for _, t := range transactions {
-		dateStr := t.CreatedAt.Format("2006-01-02")
+		dateStr := timeutil.DateKey(t.CreatedAt)
 		if _, exists := dailyMap[dateStr]; !exists {
 			dailyMap[dateStr] = &DailySpending{Date: dateStr}
 		}
@@ -793,7 +851,7 @@ func (s *transactionService) findIrregularPurchases(transactions []model.Transac
 			Description: t.Description,
 			Brand:       t.Brand,
 			Amount:      t.Amount,
-			Date:        t.CreatedAt.Format("Jan 02"),
+			Date:        timeutil.InThailand(t.CreatedAt).Format("Jan 02"),
 			Reason:      reason,
 		})
 		if len(irregular) >= 4 {
@@ -808,16 +866,17 @@ func (s *transactionService) findIrregularPurchases(transactions []model.Transac
 // just summing — so a single big Friday doesn't read the same as five
 // ordinary Fridays.
 func (s *transactionService) calculateSpendingByDayOfWeek(transactions []model.Transaction, month time.Time) []DayOfWeekSpending {
+	month = timeutil.InThailand(month)
 	days := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
 	dayMap := make(map[string]float64)
 	occurrences := make(map[string]int)
 
-	monthStart := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, month.Location())
-	monthEnd := monthStart.AddDate(0, 1, 0)
-	now := time.Now()
+	monthStart := timeutil.StartOfMonth(month)
+	monthEnd := timeutil.StartOfNextMonth(month)
+	now := timeutil.Now()
 	// For the current month, only count days that have actually happened —
 	// otherwise future zero-spend days would drag the average down.
-	if today := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location()); today.Before(monthEnd) {
+	if today := timeutil.StartOfNextDay(now); today.Before(monthEnd) {
 		monthEnd = today
 	}
 	for d := monthStart; d.Before(monthEnd); d = d.AddDate(0, 0, 1) {
@@ -826,7 +885,7 @@ func (s *transactionService) calculateSpendingByDayOfWeek(transactions []model.T
 
 	for _, t := range transactions {
 		if t.Type == model.Expense {
-			dayName := t.CreatedAt.Weekday().String()[:3]
+			dayName := timeutil.InThailand(t.CreatedAt).Weekday().String()[:3]
 			dayMap[dayName] += t.Amount
 		}
 	}

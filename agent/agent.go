@@ -31,6 +31,9 @@ type LLMClient interface {
 type LineService interface {
 	VerifySignature(body []byte, signature string) bool
 	ReplyMessage(replyToken, text string) error
+	// VerifyIDToken validates a LIFF ID token against LINE's verify endpoint
+	// and returns the LINE userId (the token's "sub" claim).
+	VerifyIDToken(idToken string) (string, error)
 }
 
 // ─────────────────────────────────────────────────────────────

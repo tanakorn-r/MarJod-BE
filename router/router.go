@@ -5,6 +5,7 @@ import (
 	"finance-chat/agent"
 	"finance-chat/config"
 	"finance-chat/controller"
+	"finance-chat/middleware"
 	"finance-chat/repository"
 	"finance-chat/service"
 	"net/http"
@@ -49,12 +50,13 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	// Transaction service with agent pipeline
 	txSvc := service.NewTransactionService(txRepo, correctionRepo, profileRepo, planRepo, walletRepo, agentDeps)
 	questSvc := service.NewQuestService(questRepo, txRepo)
+	txSvc.SetQuestProgressEvaluator(questSvc)
 	walletSvc := service.NewWalletService(walletRepo)
 	// Controllers
 	txCtrl := controller.NewTransactionController(txSvc)
 	webhookCtrl := controller.NewWebhookController(txSvc, lineSvc, txRepo)
 	questCtrl := controller.NewQuestController(questSvc)
-	walletCtrl := controller.NewWalletController(walletSvc)
+	walletCtrl := controller.NewWalletController(walletSvc, txSvc)
 
 	r := gin.Default()
 
@@ -109,6 +111,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	r.POST("/webhook", webhookCtrl.LineWebhook)
 
 	api := r.Group("/api")
+	api.Use(middleware.RequireLineAuth(lineSvc, cfg))
 	{
 		api.POST("/chat", txCtrl.Chat)
 		api.POST("/chat/stream", txCtrl.ChatStream)
@@ -125,11 +128,17 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		api.GET("/corrections", txCtrl.ListCorrections)
 		api.DELETE("/corrections/:id", txCtrl.DeleteCorrection)
 		api.GET("/quests", questCtrl.GetQuests)
+		api.POST("/quests/generate", questCtrl.GenerateQuests)
 		api.POST("/quests/reroll", questCtrl.RerollQuests)
+		api.GET("/quest-presets", questCtrl.ListQuestPresets)
+		api.POST("/quest-presets", questCtrl.CreateQuestPreset)
+		api.PATCH("/quest-presets/:id", questCtrl.UpdateQuestPreset)
+		api.DELETE("/quest-presets/:id", questCtrl.DeleteQuestPreset)
 		api.GET("/wallets", walletCtrl.ListWallets)
 		api.POST("/wallets", walletCtrl.CreateWallet)
 		api.GET("/wallets/current", walletCtrl.GetCurrentWallet)
 		api.PATCH("/wallets/current", walletCtrl.SetCurrentWallet)
+		api.PATCH("/wallets/:id", walletCtrl.UpdateWallet)
 	}
 
 	return r

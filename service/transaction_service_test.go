@@ -38,6 +38,7 @@ type mockLineService struct{}
 
 func (m *mockLineService) VerifySignature(_ []byte, _ string) bool { return true }
 func (m *mockLineService) ReplyMessage(_, _ string) error          { return nil }
+func (m *mockLineService) VerifyIDToken(_ string) (string, error)  { return "U_mock", nil }
 
 type mockTxRepo struct {
 	created  []*model.Transaction

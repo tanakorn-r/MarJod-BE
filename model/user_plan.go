@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"finance-chat/timeutil"
+	"time"
+)
 
 type PlanName string
 
@@ -23,7 +26,7 @@ type UserPlan struct {
 
 // IsExpired returns true if the plan's expiry date is in the past.
 func (p *UserPlan) IsExpired() bool {
-	return time.Now().After(p.ExpiryDate)
+	return timeutil.Now().After(p.ExpiryDate)
 }
 
 // EffectivePlan returns the plan name, falling back to free if expired.

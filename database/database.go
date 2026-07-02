@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"finance-chat/config"
 	"finance-chat/model"
+	"finance-chat/timeutil"
 	"log"
 	"os"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -41,7 +43,8 @@ func Get() *gorm.DB {
 		} else {
 			// ── Local SQLite ───────────────────────────────────────────────
 			db, err = gorm.Open(sqlite.Open(cfg.DBPath), &gorm.Config{
-				Logger: gormLogger(),
+				Logger:  gormLogger(),
+				NowFunc: timeutil.Now,
 			})
 		}
 
@@ -62,7 +65,8 @@ func openTurso(cfg *config.Config) (*gorm.DB, error) {
 		DSN:  cfg.TursoURL,
 		Conn: connector,
 	}, &gorm.Config{
-		Logger: gormLogger(),
+		Logger:  gormLogger(),
+		NowFunc: timeutil.Now,
 	})
 }
 
@@ -74,6 +78,7 @@ func Migrate(db *gorm.DB) {
 		&model.UserCorrection{},
 		&model.BehaviorProfile{},
 		&model.UserPlan{},
+		&model.QuestPreset{},
 		&model.UserQuestAssignment{},
 		&model.UserGameProfile{},
 		&model.UserWalletSelection{},
@@ -97,5 +102,20 @@ func Migrate(db *gorm.DB) {
 			log.Fatalf("[database] user_id backfill failed: %v", err)
 		}
 	}
+
+	seedQuestPresets(db)
 	log.Println("[database] migrations applied")
+}
+
+func seedQuestPresets(db *gorm.DB) {
+	presets := model.DefaultQuestPresets()
+	if len(presets) == 0 {
+		return
+	}
+	if err := db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "key"}},
+		DoNothing: true,
+	}).Create(&presets).Error; err != nil {
+		log.Fatalf("[database] quest preset seed failed: %v", err)
+	}
 }

@@ -1,12 +1,14 @@
 package controller
 
 import (
+	"errors"
 	"finance-chat/model"
 	"finance-chat/service"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type WalletController struct {
@@ -14,9 +16,8 @@ type WalletController struct {
 	svcTransction service.TransactionService
 }
 
-// NewWalletController now correctly accepts a *service.WalletService instance
-func NewWalletController(svc *service.WalletService) *WalletController {
-	return &WalletController{svc: svc}
+func NewWalletController(svc *service.WalletService, txSvc service.TransactionService) *WalletController {
+	return &WalletController{svc: svc, svcTransction: txSvc}
 }
 
 type SetCurrentWalletRequest struct {
@@ -29,17 +30,23 @@ type CreateWalletRequest struct {
 	Target float64 `json:"target"`
 }
 
+type UpdateWalletRequest struct {
+	Name   *string  `json:"name"`
+	Icon   *string  `json:"icon"`
+	Target *float64 `json:"target"`
+}
+
 // ListWallets godoc
 // @Summary      List wallets
 // @Description  Returns all wallets for the user, including the implicit General wallet.
 // @Tags         wallets
 // @Produce      json
-// @Param        user_id  query     string  false  "User ID"
-// @Success      200      {array}   model.Wallet
-// @Failure      500      {object}  ErrorResponse
+// @Security     BearerAuth
+// @Success      200  {array}   model.Wallet
+// @Failure      500  {object}  ErrorResponse
 // @Router       /api/wallets [get]
 func (ctrl *WalletController) ListWallets(c *gin.Context) {
-	userID := c.DefaultQuery("user_id", model.DefaultUserID)
+	userID := requestUserID(c)
 
 	wallets, err := ctrl.svc.GetWalletsForUser(userID)
 	if err != nil {
@@ -56,11 +63,11 @@ func (ctrl *WalletController) ListWallets(c *gin.Context) {
 // @Tags         wallets
 // @Accept       json
 // @Produce      json
-// @Param        user_id  query     string               false  "User ID"
-// @Param        body     body      CreateWalletRequest  true   "Wallet to create"
-// @Success      201      {object}  model.Wallet
-// @Failure      400      {object}  ErrorResponse
-// @Failure      500      {object}  ErrorResponse
+// @Security     BearerAuth
+// @Param        body  body      CreateWalletRequest  true  "Wallet to create"
+// @Success      201   {object}  model.Wallet
+// @Failure      400   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
 // @Router       /api/wallets [post]
 func (ctrl *WalletController) CreateWallet(c *gin.Context) {
 	var payload CreateWalletRequest
@@ -71,7 +78,7 @@ func (ctrl *WalletController) CreateWallet(c *gin.Context) {
 	}
 
 	newWallet := model.Wallet{
-		UserID: c.DefaultQuery("user_id", model.DefaultUserID),
+		UserID: requestUserID(c),
 		Name:   payload.Name,
 		Icon:   payload.Icon,
 		Target: payload.Target,
@@ -85,15 +92,55 @@ func (ctrl *WalletController) CreateWallet(c *gin.Context) {
 	c.JSON(http.StatusCreated, newWallet)
 }
 
+// UpdateWallet godoc
+// @Summary      Update a wallet
+// @Description  Updates wallet details such as monthly target, name, or icon. Passing wallet ID 0 updates the user's General wallet after ensuring it exists.
+// @Tags         wallets
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path      int                  true  "Wallet ID"
+// @Param        body  body      UpdateWalletRequest  true  "Wallet fields to update"
+// @Success      200   {object}  model.Wallet
+// @Failure      400   {object}  ErrorResponse
+// @Failure      404   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /api/wallets/{id} [patch]
+func (ctrl *WalletController) UpdateWallet(c *gin.Context) {
+	walletID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid wallet ID format"})
+		return
+	}
+
+	var payload UpdateWalletRequest
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	wallet, err := ctrl.svc.UpdateWallet(requestUserID(c), uint(walletID), payload.Name, payload.Icon, payload.Target)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "wallet not found"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, wallet)
+}
+
 // RemoveOrArchiveWallet godoc
 // @Summary      Remove or archive a wallet
 // @Description  Archives the wallet (or removes it, depending on its state) for the user.
 // @Tags         wallets
 // @Produce      json
-// @Param        id       path      int     true   "Wallet ID"
-// @Param        user_id  query     string  false  "User ID"
-// @Success      200      {object}  map[string]interface{}
-// @Failure      400      {object}  ErrorResponse
+// @Security     BearerAuth
+// @Param        id   path      int  true  "Wallet ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  ErrorResponse
 // @Router       /api/wallets/{id} [delete]
 func (ctrl *WalletController) RemoveOrArchiveWallet(c *gin.Context) {
 	walletIDStr := c.Param("id")
@@ -103,7 +150,7 @@ func (ctrl *WalletController) RemoveOrArchiveWallet(c *gin.Context) {
 		return
 	}
 
-	userID := c.DefaultQuery("user_id", model.DefaultUserID)
+	userID := requestUserID(c)
 
 	if err := ctrl.svc.RemoveOrArchiveWallet(userID, uint(walletID)); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -122,6 +169,7 @@ func (ctrl *WalletController) RemoveOrArchiveWallet(c *gin.Context) {
 // @Tags         wallets
 // @Accept       json
 // @Produce      json
+// @Security     BearerAuth
 // @Param        body  body      SetCurrentWalletRequest  true  "Wallet to switch to"
 // @Success      200   {object}  map[string]interface{}
 // @Failure      400   {object}  ErrorResponse
@@ -164,6 +212,7 @@ func (c *WalletController) SetCurrentWallet(ctx *gin.Context) {
 // @Description  Returns the wallet currently selected for new transactions.
 // @Tags         wallets
 // @Produce      json
+// @Security     BearerAuth
 // @Success      200  {object}  map[string]interface{}
 // @Failure      500  {object}  ErrorResponse
 // @Router       /api/wallets/current [get]

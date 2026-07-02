@@ -4,6 +4,11 @@
 // @host            localhost:8080
 // @BasePath        /
 
+// @securityDefinitions.apikey  BearerAuth
+// @in                          header
+// @name                        Authorization
+// @description                LIFF ID token, e.g. "Bearer <id_token from liff.getIDToken()>"
+
 package main
 
 import (

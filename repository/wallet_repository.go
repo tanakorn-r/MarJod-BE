@@ -102,6 +102,36 @@ func (r *WalletRepository) CreateNewWallet(wallet *model.Wallet) error {
 	return r.db.Create(wallet).Error
 }
 
+func (r *WalletRepository) UpdateWallet(userID string, walletID uint, updates map[string]interface{}) (*model.Wallet, error) {
+	if err := r.ensureDB(); err != nil {
+		return nil, err
+	}
+	if len(updates) == 0 {
+		return nil, errors.New("no wallet fields to update")
+	}
+
+	normalizedUID := model.UserIDOrDefault(userID)
+	if walletID == model.GeneralWalletID {
+		wallet, err := r.EnsureGeneralWallet(normalizedUID)
+		if err != nil {
+			return nil, err
+		}
+		walletID = wallet.ID
+	}
+
+	result := r.db.Model(&model.Wallet{}).
+		Where("id = ? AND user_id = ? AND is_archived = ?", walletID, normalizedUID, false).
+		Updates(updates)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return r.GetWalletByID(normalizedUID, walletID)
+	}
+
+	return r.GetWalletByID(normalizedUID, walletID)
+}
+
 // ArchiveWallet marks custom targets as settled/archived instead of deleting rows
 func (r *WalletRepository) ArchiveWallet(userID string, walletID uint) error {
 	if err := r.ensureDB(); err != nil {
@@ -128,19 +158,22 @@ func (r *WalletRepository) GetWalletByID(userID string, walletID uint) (*model.W
 	normalizedUID := model.UserIDOrDefault(userID)
 
 	if walletID == model.GeneralWalletID {
-		generalWallet := model.GetDefaultGeneralWallet(normalizedUID)
+		wallet, err := r.EnsureGeneralWallet(normalizedUID)
+		if err != nil {
+			return nil, err
+		}
 
 		var totalSpent float64
-		err := r.db.Model(&model.Transaction{}).
+		err = r.db.Model(&model.Transaction{}).
 			Select("COALESCE(SUM(amount), 0)").
-			Where("user_id = ? AND wallet_id IS NULL AND type = ?", normalizedUID, model.Expense).
+			Where("user_id = ? AND wallet_id = ? AND type = ?", normalizedUID, wallet.ID, model.Expense).
 			Scan(&totalSpent).Error
 		if err != nil {
 			return nil, err
 		}
 
-		generalWallet.Spent = totalSpent
-		return &generalWallet, nil
+		wallet.Spent = totalSpent
+		return wallet, nil
 	}
 
 	var wallet model.Wallet
@@ -179,13 +212,8 @@ func (r *WalletRepository) EnsureGeneralWallet(userID string) (*model.Wallet, er
 			return nil, err
 		}
 
-		wallet = model.Wallet{
-			UserID:     normalizedUID,
-			Name:       "General",
-			Icon:       "👝",
-			Target:     20000,
-			IsArchived: false,
-		}
+		wallet = model.GetDefaultGeneralWallet(normalizedUID)
+		wallet.ID = 0
 
 		if err := r.db.Create(&wallet).Error; err != nil {
 			return nil, err
@@ -208,6 +236,13 @@ func (r *WalletRepository) SetCurrentWallet(userID string, walletID uint) error 
 	}
 
 	normalizedUID := model.UserIDOrDefault(userID)
+	if walletID == model.GeneralWalletID {
+		wallet, err := r.EnsureGeneralWallet(normalizedUID)
+		if err != nil {
+			return err
+		}
+		walletID = wallet.ID
+	}
 
 	var wallet model.Wallet
 	if err := r.db.
@@ -241,25 +276,29 @@ func (r *WalletRepository) GetCurrentWallet(userID string) (*model.Wallet, error
 		First(&selection).Error
 
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return r.EnsureGeneralWallet(normalizedUID)
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
 		}
-
-		return nil, err
+	} else {
+		var wallet model.Wallet
+		err = r.db.
+			Where("id = ? AND user_id = ? AND is_archived = ?", selection.WalletID, normalizedUID, false).
+			First(&wallet).Error
+		if err == nil {
+			return &wallet, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
 	}
 
-	var wallet model.Wallet
-	err = r.db.
-		Where("id = ? AND user_id = ? AND is_archived = ?", selection.WalletID, normalizedUID, false).
-		First(&wallet).Error
-
+	wallet, err := r.EnsureGeneralWallet(normalizedUID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return r.EnsureGeneralWallet(normalizedUID)
-		}
-
+		return nil, err
+	}
+	if err := r.SetCurrentWallet(normalizedUID, wallet.ID); err != nil {
 		return nil, err
 	}
 
-	return &wallet, nil
+	return wallet, nil
 }

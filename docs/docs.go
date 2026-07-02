@@ -17,6 +17,11 @@ const docTemplate = `{
     "paths": {
         "/api/analytics": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns comprehensive analytics for the given month. Defaults to current month.",
                 "produces": [
                     "application/json"
@@ -57,6 +62,11 @@ const docTemplate = `{
         },
         "/api/analytics/dna": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Computes a real, data-derived behavioral snapshot — archetype, consistency/impulse-control/volatility labels, save rate, dominant category, impulse frequency, luxury drift, and top brands — entirely from real transactions. Not month-scoped; uses trailing 30/60-day windows like the existing behavior profiler.",
                 "produces": [
                     "application/json"
@@ -65,11 +75,25 @@ const docTemplate = `{
                     "analytics"
                 ],
                 "summary": "Get the user's behavioral spending DNA",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Wallet ID to scope DNA to. Use 0 for General wallet.",
+                        "name": "wallet_id",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/service.SpendingDNA"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
                         }
                     },
                     "500": {
@@ -83,6 +107,11 @@ const docTemplate = `{
         },
         "/api/analytics/insight": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Explicitly invokes OpenAI using the calculated analytics for the selected month. This endpoint consumes AI tokens; GET /api/analytics does not.",
                 "produces": [
                     "application/json"
@@ -123,6 +152,11 @@ const docTemplate = `{
         },
         "/api/analytics/trend": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns just the total expense for each of the last ` + "`" + `months` + "`" + ` calendar months ending at ` + "`" + `month` + "`" + `. Lightweight alternative to calling GET /api/analytics once per month.",
                 "produces": [
                     "application/json"
@@ -172,6 +206,11 @@ const docTemplate = `{
         },
         "/api/chat": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Waits for the full LLM response, runs the agent pipeline, and returns the result with transaction, behavior DNA, alerts, and recommendations.",
                 "consumes": [
                     "application/json"
@@ -218,6 +257,11 @@ const docTemplate = `{
         },
         "/api/chat/stream": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Streams LLM tokens as Server-Sent Events. Each token is sent as ` + "`" + `event: token` + "`" + `.\nWhen the model finishes, the pipeline result (transaction + behavior DNA + alerts + recommendations) is sent as ` + "`" + `event: done` + "`" + ` with JSON body.\nOn error, ` + "`" + `event: error` + "`" + ` is sent and the stream closes.",
                 "consumes": [
                     "application/json"
@@ -261,6 +305,11 @@ const docTemplate = `{
         },
         "/api/corrections": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns all manual corrections made by the user. These corrections are used to train the AI.",
                 "produces": [
                     "application/json"
@@ -290,6 +339,11 @@ const docTemplate = `{
         },
         "/api/corrections/{id}": {
             "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Remove a correction by its ID. This will stop the AI from learning from this example.",
                 "produces": [
                     "application/json"
@@ -332,9 +386,222 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/quest-presets": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns DB-backed preset quests used by the reward assignment pool. Pass include_inactive=true to include archived presets.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "quests"
+                ],
+                "summary": "List quest presets",
+                "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "Include inactive/deleted presets",
+                        "name": "include_inactive",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.QuestPreset"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a daily or weekly preset quest definition. User assignment/completion state remains stored separately.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "quests"
+                ],
+                "summary": "Create a quest preset",
+                "parameters": [
+                    {
+                        "description": "Quest preset",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/controller.CreateQuestPresetRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.QuestPreset"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/quest-presets/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Archives a preset by setting is_active=false so existing user assignment history remains readable.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "quests"
+                ],
+                "summary": "Delete a quest preset",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Quest preset ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates editable preset quest metadata/rules. Existing user assignments keep their stored template key and history.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "quests"
+                ],
+                "summary": "Update a quest preset",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Quest preset ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Quest preset fields",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/controller.UpdateQuestPresetRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.QuestPreset"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/quests": {
             "get": {
-                "description": "Returns the user's current quest batch with progress evaluated live from real transactions, plus game profile (level/XP) and streak. Quests are auto-completed and XP is awarded idempotently as soon as their progress condition is met.",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the user's active quest batches with progress evaluated live from real transactions, plus game profile (level/XP) and streak. This read does not auto-assign quests; call POST /api/quests/generate to activate daily or weekly quests.",
                 "produces": [
                     "application/json"
                 ],
@@ -358,8 +625,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/quests/generate": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Randomly picks active preset quests for the requested period if the user does not already have an active batch. Daily quests expire at next midnight; weekly quests expire after Sunday at next Monday 00:00.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "quests"
+                ],
+                "summary": "Generate and activate daily or weekly quests",
+                "parameters": [
+                    {
+                        "description": "Quest period to activate",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/controller.GenerateQuestsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.QuestBoard"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/quests/reroll": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Picks a new random batch of quest templates. Rejected with 400 if the current batch still has an incomplete quest.",
                 "produces": [
                     "application/json"
@@ -392,6 +715,11 @@ const docTemplate = `{
         },
         "/api/summary": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns total income, total expense, and current balance.",
                 "produces": [
                     "application/json"
@@ -418,6 +746,11 @@ const docTemplate = `{
         },
         "/api/transactions": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns all saved income and expense transactions, newest first.",
                 "produces": [
                     "application/json"
@@ -426,6 +759,14 @@ const docTemplate = `{
                     "transactions"
                 ],
                 "summary": "List all transactions",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Wallet ID to filter by. Use 0 for General wallet. Omit for all wallets.",
+                        "name": "wallet_id",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -434,6 +775,12 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/model.Transaction"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
                         }
                     },
                     "500": {
@@ -447,6 +794,11 @@ const docTemplate = `{
         },
         "/api/transactions/by-category": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns transactions filtered by category and optional month, sorted by most recent first.",
                 "produces": [
                     "application/json"
@@ -499,6 +851,11 @@ const docTemplate = `{
         },
         "/api/transactions/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns a single transaction by ID with full details.",
                 "produces": [
                     "application/json"
@@ -544,6 +901,11 @@ const docTemplate = `{
                 }
             },
             "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Remove a transaction by its ID.",
                 "produces": [
                     "application/json"
@@ -588,6 +950,11 @@ const docTemplate = `{
         },
         "/api/transactions/{id}/correct": {
             "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "User can fix category, sub_category, brand or behavior_tag. Corrections are saved and fed back to the AI on future requests.",
                 "consumes": [
                     "application/json"
@@ -641,6 +1008,11 @@ const docTemplate = `{
         },
         "/api/wallets": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns all wallets for the user, including the implicit General wallet.",
                 "produces": [
                     "application/json"
@@ -649,14 +1021,6 @@ const docTemplate = `{
                     "wallets"
                 ],
                 "summary": "List wallets",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "User ID",
-                        "name": "user_id",
-                        "in": "query"
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -676,6 +1040,11 @@ const docTemplate = `{
                 }
             },
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Creates a new occasion wallet for the user.",
                 "consumes": [
                     "application/json"
@@ -688,12 +1057,6 @@ const docTemplate = `{
                 ],
                 "summary": "Create a wallet",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "User ID",
-                        "name": "user_id",
-                        "in": "query"
-                    },
                     {
                         "description": "Wallet to create",
                         "name": "body",
@@ -728,6 +1091,11 @@ const docTemplate = `{
         },
         "/api/wallets/current": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns the wallet currently selected for new transactions.",
                 "produces": [
                     "application/json"
@@ -753,6 +1121,11 @@ const docTemplate = `{
                 }
             },
             "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Sets which wallet new transactions should be attributed to.",
                 "consumes": [
                     "application/json"
@@ -800,6 +1173,11 @@ const docTemplate = `{
         },
         "/api/wallets/{id}": {
             "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Archives the wallet (or removes it, depending on its state) for the user.",
                 "produces": [
                     "application/json"
@@ -815,12 +1193,6 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "User ID",
-                        "name": "user_id",
-                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -833,6 +1205,68 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates wallet details such as monthly target, name, or icon. Passing wallet ID 0 updates the user's General wallet after ensuring it exists.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "wallets"
+                ],
+                "summary": "Update a wallet",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Wallet ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Wallet fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/controller.UpdateWalletRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.Wallet"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/controller.ErrorResponse"
                         }
@@ -904,10 +1338,6 @@ const docTemplate = `{
                 "message": {
                     "type": "string",
                     "example": "spent 250 baht on lunch"
-                },
-                "user_id": {
-                    "type": "string",
-                    "example": "U1234567890"
                 }
             }
         },
@@ -929,6 +1359,86 @@ const docTemplate = `{
                 "sub_category": {
                     "type": "string",
                     "example": "Coffee"
+                }
+            }
+        },
+        "controller.CreateQuestPresetRequest": {
+            "type": "object",
+            "required": [
+                "difficulty",
+                "key",
+                "name",
+                "period",
+                "rule_type",
+                "xp"
+            ],
+            "properties": {
+                "accent": {
+                    "type": "string",
+                    "example": "#D9463B"
+                },
+                "behavior_tag": {
+                    "type": "string",
+                    "example": "impulse"
+                },
+                "category": {
+                    "type": "string",
+                    "example": "Food \u0026 Beverage"
+                },
+                "difficulty": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.QuestDifficulty"
+                        }
+                    ],
+                    "example": "advanced"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "key": {
+                    "type": "string",
+                    "example": "coffee_cap_weekly_250"
+                },
+                "logo": {
+                    "type": "string",
+                    "example": "☕"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Coffee discipline"
+                },
+                "period": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.QuestPeriod"
+                        }
+                    ],
+                    "example": "weekly"
+                },
+                "rule_type": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.QuestRuleType"
+                        }
+                    ],
+                    "example": "coffee_spend_cap"
+                },
+                "sub_category": {
+                    "type": "string",
+                    "example": "Coffee"
+                },
+                "target": {
+                    "type": "number",
+                    "example": 500
+                },
+                "unit": {
+                    "type": "string",
+                    "example": "thb"
+                },
+                "xp": {
+                    "type": "integer",
+                    "example": 50
                 }
             }
         },
@@ -955,6 +1465,22 @@ const docTemplate = `{
                 "error": {
                     "type": "string",
                     "example": "something went wrong"
+                }
+            }
+        },
+        "controller.GenerateQuestsRequest": {
+            "type": "object",
+            "required": [
+                "period"
+            ],
+            "properties": {
+                "period": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.QuestPeriod"
+                        }
+                    ],
+                    "example": "daily"
                 }
             }
         },
@@ -1020,6 +1546,67 @@ const docTemplate = `{
                 }
             }
         },
+        "controller.UpdateQuestPresetRequest": {
+            "type": "object",
+            "properties": {
+                "accent": {
+                    "type": "string"
+                },
+                "behavior_tag": {
+                    "type": "string"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "difficulty": {
+                    "$ref": "#/definitions/model.QuestDifficulty"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "logo": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "period": {
+                    "$ref": "#/definitions/model.QuestPeriod"
+                },
+                "rule_type": {
+                    "$ref": "#/definitions/model.QuestRuleType"
+                },
+                "sub_category": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "number"
+                },
+                "unit": {
+                    "type": "string"
+                },
+                "xp": {
+                    "type": "integer"
+                }
+            }
+        },
+        "controller.UpdateWalletRequest": {
+            "type": "object",
+            "properties": {
+                "icon": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "number"
+                }
+            }
+        },
         "model.Alert": {
             "type": "object",
             "properties": {
@@ -1071,6 +1658,117 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "model.QuestDifficulty": {
+            "type": "string",
+            "enum": [
+                "basic",
+                "advanced",
+                "expert",
+                "master",
+                "grand_master",
+                "easy",
+                "medium",
+                "hard"
+            ],
+            "x-enum-varnames": [
+                "QuestBasic",
+                "QuestAdvanced",
+                "QuestExpert",
+                "QuestMaster",
+                "QuestGrandMaster",
+                "QuestEasy",
+                "QuestMedium",
+                "QuestHard"
+            ]
+        },
+        "model.QuestPeriod": {
+            "type": "string",
+            "enum": [
+                "daily",
+                "weekly"
+            ],
+            "x-enum-varnames": [
+                "QuestPeriodDaily",
+                "QuestPeriodWeekly"
+            ]
+        },
+        "model.QuestPreset": {
+            "type": "object",
+            "properties": {
+                "accent": {
+                    "type": "string"
+                },
+                "behavior_tag": {
+                    "type": "string"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "difficulty": {
+                    "$ref": "#/definitions/model.QuestDifficulty"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "logo": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "period": {
+                    "$ref": "#/definitions/model.QuestPeriod"
+                },
+                "rule_type": {
+                    "$ref": "#/definitions/model.QuestRuleType"
+                },
+                "sub_category": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "number"
+                },
+                "unit": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "xp": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.QuestRuleType": {
+            "type": "string",
+            "enum": [
+                "log_transaction_count",
+                "spend_cap",
+                "no_impulse",
+                "no_spend_days",
+                "category_spend_cap",
+                "coffee_spend_cap",
+                "beat_last_month_savings_rate"
+            ],
+            "x-enum-varnames": [
+                "QuestRuleLogTransactionCount",
+                "QuestRuleSpendCap",
+                "QuestRuleNoImpulse",
+                "QuestRuleNoSpendDays",
+                "QuestRuleCategorySpendCap",
+                "QuestRuleCoffeeSpendCap",
+                "QuestRuleBeatLastMonthSavingsRate"
+            ]
         },
         "model.Recommendation": {
             "type": "object",
@@ -1509,6 +2207,35 @@ const docTemplate = `{
                 }
             }
         },
+        "service.LevelRewardView": {
+            "type": "object",
+            "properties": {
+                "cosmetic": {
+                    "type": "string"
+                },
+                "feature": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "level": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                },
+                "unlocked": {
+                    "type": "boolean"
+                },
+                "xp_required": {
+                    "type": "integer"
+                }
+            }
+        },
         "service.MonthlyExpensePoint": {
             "type": "object",
             "properties": {
@@ -1578,8 +2305,26 @@ const docTemplate = `{
         "service.QuestBoard": {
             "type": "object",
             "properties": {
+                "can_generate_daily": {
+                    "type": "boolean"
+                },
+                "can_generate_weekly": {
+                    "type": "boolean"
+                },
                 "can_reroll": {
                     "type": "boolean"
+                },
+                "daily_quests": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.QuestView"
+                    }
+                },
+                "levels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.LevelRewardView"
+                    }
                 },
                 "profile": {
                     "$ref": "#/definitions/service.GameProfileView"
@@ -1590,8 +2335,58 @@ const docTemplate = `{
                         "$ref": "#/definitions/service.QuestView"
                     }
                 },
+                "rewards": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.LevelRewardView"
+                    }
+                },
+                "stats": {
+                    "$ref": "#/definitions/service.QuestStats"
+                },
                 "streak": {
                     "$ref": "#/definitions/service.StreakView"
+                },
+                "weekly_quests": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.QuestView"
+                    }
+                }
+            }
+        },
+        "service.QuestStats": {
+            "type": "object",
+            "properties": {
+                "current_batch_completed": {
+                    "type": "integer"
+                },
+                "current_batch_remaining": {
+                    "type": "integer"
+                },
+                "current_batch_total": {
+                    "type": "integer"
+                },
+                "current_batch_xp_available": {
+                    "type": "integer"
+                },
+                "current_batch_xp_earned": {
+                    "type": "integer"
+                },
+                "daily_completed": {
+                    "type": "integer"
+                },
+                "daily_total": {
+                    "type": "integer"
+                },
+                "total_xp": {
+                    "type": "integer"
+                },
+                "weekly_completed": {
+                    "type": "integer"
+                },
+                "weekly_total": {
+                    "type": "integer"
                 }
             }
         },
@@ -1599,6 +2394,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "accent": {
+                    "type": "string"
+                },
+                "assigned_at": {
+                    "type": "string"
+                },
+                "completed_at": {
                     "type": "string"
                 },
                 "current": {
@@ -1610,7 +2411,16 @@ const docTemplate = `{
                 "done": {
                     "type": "boolean"
                 },
+                "expires_at": {
+                    "type": "string"
+                },
                 "key": {
+                    "type": "string"
+                },
+                "logo": {
+                    "type": "string"
+                },
+                "period": {
                     "type": "string"
                 },
                 "target": {
@@ -1624,6 +2434,9 @@ const docTemplate = `{
                 },
                 "xp": {
                     "type": "integer"
+                },
+                "xp_awarded": {
+                    "type": "boolean"
                 }
             }
         },
@@ -1698,6 +2511,14 @@ const docTemplate = `{
                     "type": "number"
                 }
             }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "LIFF ID token, e.g. \"Bearer \u003cid_token from liff.getIDToken()\u003e\"",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
         }
     }
 }`

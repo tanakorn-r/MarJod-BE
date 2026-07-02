@@ -2,8 +2,10 @@ package controller
 
 import (
 	"encoding/json"
+	"finance-chat/middleware"
 	"finance-chat/model"
 	"finance-chat/service"
+	"finance-chat/timeutil"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,18 +25,20 @@ func NewTransactionController(svc service.TransactionService) *TransactionContro
 
 // ChatRequest represents the chat input
 type ChatRequest struct {
-	UserID  string `json:"user_id" example:"U1234567890"`
 	Message string `json:"message" binding:"required" example:"spent 250 baht on lunch"`
 }
 
-// requestUserID accepts the user identity from a query parameter or header.
-// "default" preserves access to records created before per-user storage.
+// requestUserID returns the LINE userId verified by middleware.RequireLineAuth,
+// which runs ahead of every /api handler and aborts unauthenticated requests
+// before they get here. "default" preserves access to records created before
+// per-user storage.
 func requestUserID(ctx *gin.Context) string {
-	userID := ctx.Query("user_id")
-	if userID == "" {
-		userID = ctx.GetHeader("X-User-ID")
+	if v, ok := ctx.Get(middleware.UserIDContextKey); ok {
+		if userID, ok := v.(string); ok && userID != "" {
+			return model.UserIDOrDefault(userID)
+		}
 	}
-	return model.UserIDOrDefault(userID)
+	return model.DefaultUserID
 }
 
 // ErrorResponse represents an error payload
@@ -48,6 +52,7 @@ type ErrorResponse struct {
 // @Tags         chat
 // @Accept       json
 // @Produce      json
+// @Security     BearerAuth
 // @Param        body  body      ChatRequest        true  "Message to parse"
 // @Success      201   {object}  agent.PipelineResult
 // @Failure      400   {object}  ErrorResponse
@@ -60,7 +65,7 @@ func (c *TransactionController) Chat(ctx *gin.Context) {
 		return
 	}
 
-	result, err := c.svc.Chat(model.UserIDOrDefault(req.UserID), req.Message)
+	result, err := c.svc.Chat(requestUserID(ctx), req.Message)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
@@ -77,6 +82,7 @@ func (c *TransactionController) Chat(ctx *gin.Context) {
 // @Tags         chat
 // @Accept       json
 // @Produce      text/event-stream
+// @Security     BearerAuth
 // @Param        body  body  ChatRequest  true  "Message to parse"
 // @Success      200
 // @Failure      400  {object}  ErrorResponse
@@ -89,7 +95,7 @@ func (c *TransactionController) ChatStream(ctx *gin.Context) {
 		return
 	}
 
-	tokens, done, errc := c.svc.ChatStream(model.UserIDOrDefault(req.UserID), req.Message)
+	tokens, done, errc := c.svc.ChatStream(requestUserID(ctx), req.Message)
 
 	ctx.Header("Content-Type", "text/event-stream")
 	ctx.Header("Cache-Control", "no-cache")
@@ -142,6 +148,7 @@ type CorrectionRequest struct {
 // @Tags         transactions
 // @Accept       json
 // @Produce      json
+// @Security     BearerAuth
 // @Param        id    path      int                true  "Transaction ID"
 // @Param        body  body      CorrectionRequest  true  "Fields to correct (only non-empty fields are applied)"
 // @Success      200   {object}  model.Transaction
@@ -174,6 +181,7 @@ func (c *TransactionController) Correct(ctx *gin.Context) {
 // @Description  Returns transactions filtered by category and optional month, sorted by most recent first.
 // @Tags         transactions
 // @Produce      json
+// @Security     BearerAuth
 // @Param        category  query     string  false  "Category name (e.g. Food & Beverage)"
 // @Param        month     query     string  false  "Month filter YYYY-MM (e.g. 2026-06). Defaults to all months."
 // @Param        page      query     int     false  "Page number (default 1)"
@@ -207,11 +215,31 @@ func (c *TransactionController) ListByCategory(ctx *gin.Context) {
 // @Description  Returns all saved income and expense transactions, newest first.
 // @Tags         transactions
 // @Produce      json
+// @Security     BearerAuth
+// @Param        wallet_id  query     int  false  "Wallet ID to filter by. Use 0 for General wallet. Omit for all wallets."
 // @Success      200  {array}   model.Transaction
+// @Failure      400  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
 // @Router       /api/transactions [get]
 func (c *TransactionController) List(ctx *gin.Context) {
-	list, err := c.svc.List(requestUserID(ctx))
+	walletIDStr := ctx.Query("wallet_id")
+	if walletIDStr == "" {
+		list, err := c.svc.List(requestUserID(ctx))
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusOK, list)
+		return
+	}
+
+	id, err := strconv.ParseUint(walletIDStr, 10, 32)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid wallet_id format"})
+		return
+	}
+
+	list, err := c.svc.List(requestUserID(ctx), uint(id))
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
@@ -224,6 +252,7 @@ func (c *TransactionController) List(ctx *gin.Context) {
 // @Description  Remove a transaction by its ID.
 // @Tags         transactions
 // @Produce      json
+// @Security     BearerAuth
 // @Param        id   path      int  true  "Transaction ID"
 // @Success      200  {object}  map[string]string
 // @Failure      400  {object}  ErrorResponse
@@ -249,6 +278,7 @@ func (c *TransactionController) Delete(ctx *gin.Context) {
 // @Description  Returns total income, total expense, and current balance.
 // @Tags         transactions
 // @Produce      json
+// @Security     BearerAuth
 // @Success      200  {object}  service.Summary
 // @Failure      500  {object}  ErrorResponse
 // @Router       /api/summary [get]
@@ -266,6 +296,7 @@ func (c *TransactionController) Summary(ctx *gin.Context) {
 // @Description  Returns a single transaction by ID with full details.
 // @Tags         transactions
 // @Produce      json
+// @Security     BearerAuth
 // @Param        id   path      int  true  "Transaction ID"
 // @Success      200  {object}  model.Transaction
 // @Failure      400  {object}  ErrorResponse
@@ -293,6 +324,7 @@ func (c *TransactionController) GetByID(ctx *gin.Context) {
 // @Description  Returns comprehensive analytics for the given month. Defaults to current month.
 // @Tags         analytics
 // @Produce      json
+// @Security     BearerAuth
 // @Param        month  query     string  false  "Month to analyse (YYYY-MM, e.g. 2026-06). Defaults to current month."
 // @Success      200    {object}  service.AnalyticsDashboard
 // @Failure      400    {object}  ErrorResponse
@@ -333,6 +365,7 @@ func (c *TransactionController) Analytics(ctx *gin.Context) {
 // @Description  Returns just the total expense for each of the last `months` calendar months ending at `month`. Lightweight alternative to calling GET /api/analytics once per month.
 // @Tags         analytics
 // @Produce      json
+// @Security     BearerAuth
 // @Param        month   query     string  false  "Last month in the trend (YYYY-MM, e.g. 2026-06). Defaults to current month."
 // @Param        months  query     int     false  "Number of trailing months to include (1-24). Defaults to 6."
 // @Success      200     {array}   service.MonthlyExpensePoint
@@ -369,11 +402,31 @@ func (c *TransactionController) AnalyticsTrend(ctx *gin.Context) {
 // @Description  Computes a real, data-derived behavioral snapshot — archetype, consistency/impulse-control/volatility labels, save rate, dominant category, impulse frequency, luxury drift, and top brands — entirely from real transactions. Not month-scoped; uses trailing 30/60-day windows like the existing behavior profiler.
 // @Tags         analytics
 // @Produce      json
+// @Security     BearerAuth
+// @Param        wallet_id  query     int  false  "Wallet ID to scope DNA to. Use 0 for General wallet."
 // @Success      200  {object}  service.SpendingDNA
+// @Failure      400  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
 // @Router       /api/analytics/dna [get]
 func (c *TransactionController) SpendingDNA(ctx *gin.Context) {
-	dna, err := c.svc.GetSpendingDNA(requestUserID(ctx))
+	walletIDStr := ctx.Query("wallet_id")
+	if walletIDStr == "" {
+		dna, err := c.svc.GetSpendingDNA(requestUserID(ctx))
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusOK, dna)
+		return
+	}
+
+	id, err := strconv.ParseUint(walletIDStr, 10, 32)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid wallet_id format"})
+		return
+	}
+
+	dna, err := c.svc.GetSpendingDNA(requestUserID(ctx), uint(id))
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
@@ -386,6 +439,7 @@ func (c *TransactionController) SpendingDNA(ctx *gin.Context) {
 // @Description  Explicitly invokes OpenAI using the calculated analytics for the selected month. This endpoint consumes AI tokens; GET /api/analytics does not.
 // @Tags         analytics
 // @Produce      json
+// @Security     BearerAuth
 // @Param        month  query     string  false  "Month to analyse (YYYY-MM, e.g. 2026-06). Defaults to current month."
 // @Success      200    {object}  service.PersonalFinanceInsight
 // @Failure      400    {object}  ErrorResponse
@@ -421,13 +475,13 @@ func (c *TransactionController) AnalyticsInsight(ctx *gin.Context) {
 }
 
 // parseMonthParam reads ?month=YYYY-MM from the query string.
-// Returns time.Now() when the param is absent, 400 when it's malformed.
+// Returns Thailand current time when the param is absent, 400 when it's malformed.
 func parseMonthParam(ctx *gin.Context) (time.Time, error) {
 	raw := ctx.Query("month")
 	if raw == "" {
-		return time.Now(), nil
+		return timeutil.Now(), nil
 	}
-	t, err := time.Parse("2006-01", raw)
+	t, err := timeutil.ParseMonth(raw)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("invalid month format %q — use YYYY-MM (e.g. 2026-06)", raw)
 	}
@@ -439,6 +493,7 @@ func parseMonthParam(ctx *gin.Context) (time.Time, error) {
 // @Description  Returns all manual corrections made by the user. These corrections are used to train the AI.
 // @Tags         corrections
 // @Produce      json
+// @Security     BearerAuth
 // @Success      200  {array}   model.UserCorrection
 // @Failure      500  {object}  ErrorResponse
 // @Router       /api/corrections [get]
@@ -456,6 +511,7 @@ func (c *TransactionController) ListCorrections(ctx *gin.Context) {
 // @Description  Remove a correction by its ID. This will stop the AI from learning from this example.
 // @Tags         corrections
 // @Produce      json
+// @Security     BearerAuth
 // @Param        id   path      int  true  "Correction ID"
 // @Success      200  {object}  map[string]string
 // @Failure      400  {object}  ErrorResponse

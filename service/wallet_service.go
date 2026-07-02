@@ -4,6 +4,7 @@ import (
 	"errors"
 	"finance-chat/model"
 	"finance-chat/repository"
+	"strings"
 )
 
 type WalletService struct {
@@ -41,6 +42,33 @@ func (s *WalletService) CreateNewOccasionWallet(wallet *model.Wallet) error {
 	}
 
 	return s.repo.CreateNewWallet(wallet)
+}
+
+func (s *WalletService) UpdateWallet(userID string, walletID uint, name, icon *string, target *float64) (*model.Wallet, error) {
+	userID = model.UserIDOrDefault(userID)
+
+	updates := map[string]interface{}{}
+	if name != nil {
+		trimmed := strings.TrimSpace(*name)
+		if trimmed == "" {
+			return nil, errors.New("wallet name cannot be empty")
+		}
+		updates["name"] = trimmed
+	}
+	if icon != nil {
+		updates["icon"] = strings.TrimSpace(*icon)
+	}
+	if target != nil {
+		if *target <= 0 {
+			return nil, errors.New("wallet budget target must be greater than zero")
+		}
+		updates["target"] = *target
+	}
+	if len(updates) == 0 {
+		return nil, errors.New("at least one wallet field must be provided")
+	}
+
+	return s.repo.UpdateWallet(userID, walletID, updates)
 }
 
 // RemoveOrArchiveWallet checks system guards before delegating archive states to db storage

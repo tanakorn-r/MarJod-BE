@@ -9,7 +9,10 @@ import (
 	"finance-chat/agent"
 	"finance-chat/config"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 )
 
@@ -74,4 +77,61 @@ func (s *lineService) ReplyMessage(replyToken, text string) error {
 	}
 
 	return nil
+}
+
+// verifyIDTokenResponse mirrors the payload returned by LINE's ID token
+// verification endpoint. See: https://developers.line.biz/en/reference/liff/#verify-id-token
+type verifyIDTokenResponse struct {
+	Sub   string `json:"sub"`
+	Aud   string `json:"aud"`
+	Error string `json:"error"`
+}
+
+// VerifyIDToken validates a LIFF ID token against LINE's verify endpoint and
+// returns the verified LINE userId (the token's "sub" claim). The token's
+// audience must match the configured LIFF channel ID.
+func (s *lineService) VerifyIDToken(idToken string) (string, error) {
+	if strings.TrimSpace(idToken) == "" {
+		return "", fmt.Errorf("empty id token")
+	}
+	if s.cfg.LineLiffChannelID == "" {
+		return "", fmt.Errorf("LINE_LIFF_CHANNEL_ID is not configured")
+	}
+
+	form := url.Values{
+		"id_token":  {idToken},
+		"client_id": {s.cfg.LineLiffChannelID},
+	}
+
+	resp, err := s.client.PostForm("https://api.line.me/oauth2/v2.1/verify", form)
+	if err != nil {
+		return "", fmt.Errorf("verify id token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read verify response: %w", err)
+	}
+
+	var result verifyIDTokenResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("parse verify response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		if result.Error != "" {
+			return "", fmt.Errorf("id token rejected: %s", result.Error)
+		}
+		return "", fmt.Errorf("id token verification returned %d", resp.StatusCode)
+	}
+
+	if result.Aud != s.cfg.LineLiffChannelID {
+		return "", fmt.Errorf("id token audience mismatch")
+	}
+	if result.Sub == "" {
+		return "", fmt.Errorf("id token has no sub claim")
+	}
+
+	return result.Sub, nil
 }

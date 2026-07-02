@@ -2,7 +2,7 @@ package repository
 
 import (
 	"finance-chat/model"
-	"time"
+	"finance-chat/timeutil"
 
 	"gorm.io/gorm"
 )
@@ -28,6 +28,11 @@ func NewTransactionRepository(db *gorm.DB) TransactionRepository {
 
 func (r *transactionRepository) Create(t *model.Transaction) error {
 	t.UserID = model.UserIDOrDefault(t.UserID)
+	if t.CreatedAt.IsZero() {
+		t.CreatedAt = timeutil.Now()
+	} else {
+		t.CreatedAt = timeutil.InThailand(t.CreatedAt)
+	}
 	if t.WalletID != nil && *t.WalletID == model.GeneralWalletID {
 		zero := uint(0)
 		t.WalletID = &zero
@@ -60,9 +65,9 @@ func (r *transactionRepository) FindLatestByUserID(userID string) (*model.Transa
 
 func (r *transactionRepository) FindTodayByUserID(userID string) ([]model.Transaction, error) {
 	var list []model.Transaction
-	now := time.Now()
-	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	end := start.Add(24 * time.Hour)
+	now := timeutil.Now()
+	start := timeutil.StartOfDay(now)
+	end := timeutil.StartOfNextDay(now)
 	err := r.db.Where("user_id = ? AND created_at >= ? AND created_at < ?", model.UserIDOrDefault(userID), start, end).
 		Order("created_at desc").Find(&list).Error
 	return list, err
@@ -80,10 +85,10 @@ func (r *transactionRepository) FindByCategory(userID, category, month string, p
 
 	// Filter by month if provided (format: "2006-01")
 	if month != "" {
-		t, err := time.Parse("2006-01", month)
+		t, err := timeutil.ParseMonth(month)
 		if err == nil {
-			start := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
-			end := start.AddDate(0, 1, 0)
+			start := timeutil.StartOfMonth(t)
+			end := timeutil.StartOfNextMonth(t)
 			query = query.Where("created_at >= ? AND created_at < ?", start, end)
 		}
 	}

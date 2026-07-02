@@ -55,3 +55,40 @@ func TestMigratePreservesLegacyTransactionsAndBackfillsUserID(t *testing.T) {
 		t.Fatalf("legacy user_id: want %q, got %q", model.DefaultUserID, got.UserID)
 	}
 }
+
+func TestMigrateSeedsQuestPresetsWithoutOverwritingExistingRows(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "quest-presets.db")
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+
+	Migrate(db)
+
+	var count int64
+	if err := db.Model(&model.QuestPreset{}).Count(&count).Error; err != nil {
+		t.Fatalf("count quest presets: %v", err)
+	}
+	if want := int64(len(model.DefaultQuestPresets())); count != want {
+		t.Fatalf("quest preset count: want %d, got %d", want, count)
+	}
+
+	var preset model.QuestPreset
+	if err := db.Where("key = ?", model.QuestTemplateKey("daily_log_transaction")).First(&preset).Error; err != nil {
+		t.Fatalf("find seeded preset: %v", err)
+	}
+	preset.Name = "Custom admin title"
+	if err := db.Save(&preset).Error; err != nil {
+		t.Fatalf("customize preset: %v", err)
+	}
+
+	Migrate(db)
+
+	var after model.QuestPreset
+	if err := db.Where("key = ?", model.QuestTemplateKey("daily_log_transaction")).First(&after).Error; err != nil {
+		t.Fatalf("find preset after second migrate: %v", err)
+	}
+	if after.Name != "Custom admin title" {
+		t.Fatalf("migration overwrote customized preset name: %q", after.Name)
+	}
+}

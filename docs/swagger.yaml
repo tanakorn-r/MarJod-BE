@@ -20,9 +20,6 @@ definitions:
       message:
         example: spent 250 baht on lunch
         type: string
-      user_id:
-        example: U1234567890
-        type: string
     required:
     - message
     type: object
@@ -41,6 +38,60 @@ definitions:
         example: Coffee
         type: string
     type: object
+  controller.CreateQuestPresetRequest:
+    properties:
+      accent:
+        example: '#D9463B'
+        type: string
+      behavior_tag:
+        example: impulse
+        type: string
+      category:
+        example: Food & Beverage
+        type: string
+      difficulty:
+        allOf:
+        - $ref: '#/definitions/model.QuestDifficulty'
+        example: advanced
+      is_active:
+        type: boolean
+      key:
+        example: coffee_cap_weekly_250
+        type: string
+      logo:
+        example: ☕
+        type: string
+      name:
+        example: Coffee discipline
+        type: string
+      period:
+        allOf:
+        - $ref: '#/definitions/model.QuestPeriod'
+        example: weekly
+      rule_type:
+        allOf:
+        - $ref: '#/definitions/model.QuestRuleType'
+        example: coffee_spend_cap
+      sub_category:
+        example: Coffee
+        type: string
+      target:
+        example: 500
+        type: number
+      unit:
+        example: thb
+        type: string
+      xp:
+        example: 50
+        type: integer
+    required:
+    - difficulty
+    - key
+    - name
+    - period
+    - rule_type
+    - xp
+    type: object
   controller.CreateWalletRequest:
     properties:
       icon:
@@ -57,6 +108,15 @@ definitions:
       error:
         example: something went wrong
         type: string
+    type: object
+  controller.GenerateQuestsRequest:
+    properties:
+      period:
+        allOf:
+        - $ref: '#/definitions/model.QuestPeriod'
+        example: daily
+    required:
+    - period
     type: object
   controller.LineEvent:
     properties:
@@ -99,6 +159,46 @@ definitions:
     required:
     - wallet_id
     type: object
+  controller.UpdateQuestPresetRequest:
+    properties:
+      accent:
+        type: string
+      behavior_tag:
+        type: string
+      category:
+        type: string
+      difficulty:
+        $ref: '#/definitions/model.QuestDifficulty'
+      is_active:
+        type: boolean
+      key:
+        type: string
+      logo:
+        type: string
+      name:
+        type: string
+      period:
+        $ref: '#/definitions/model.QuestPeriod'
+      rule_type:
+        $ref: '#/definitions/model.QuestRuleType'
+      sub_category:
+        type: string
+      target:
+        type: number
+      unit:
+        type: string
+      xp:
+        type: integer
+    type: object
+  controller.UpdateWalletRequest:
+    properties:
+      icon:
+        type: string
+      name:
+        type: string
+      target:
+        type: number
+    type: object
   model.Alert:
     properties:
       amount:
@@ -135,6 +235,89 @@ definitions:
           type: string
         type: array
     type: object
+  model.QuestDifficulty:
+    enum:
+    - basic
+    - advanced
+    - expert
+    - master
+    - grand_master
+    - easy
+    - medium
+    - hard
+    type: string
+    x-enum-varnames:
+    - QuestBasic
+    - QuestAdvanced
+    - QuestExpert
+    - QuestMaster
+    - QuestGrandMaster
+    - QuestEasy
+    - QuestMedium
+    - QuestHard
+  model.QuestPeriod:
+    enum:
+    - daily
+    - weekly
+    type: string
+    x-enum-varnames:
+    - QuestPeriodDaily
+    - QuestPeriodWeekly
+  model.QuestPreset:
+    properties:
+      accent:
+        type: string
+      behavior_tag:
+        type: string
+      category:
+        type: string
+      created_at:
+        type: string
+      difficulty:
+        $ref: '#/definitions/model.QuestDifficulty'
+      id:
+        type: integer
+      is_active:
+        type: boolean
+      key:
+        type: string
+      logo:
+        type: string
+      name:
+        type: string
+      period:
+        $ref: '#/definitions/model.QuestPeriod'
+      rule_type:
+        $ref: '#/definitions/model.QuestRuleType'
+      sub_category:
+        type: string
+      target:
+        type: number
+      unit:
+        type: string
+      updated_at:
+        type: string
+      xp:
+        type: integer
+    type: object
+  model.QuestRuleType:
+    enum:
+    - log_transaction_count
+    - spend_cap
+    - no_impulse
+    - no_spend_days
+    - category_spend_cap
+    - coffee_spend_cap
+    - beat_last_month_savings_rate
+    type: string
+    x-enum-varnames:
+    - QuestRuleLogTransactionCount
+    - QuestRuleSpendCap
+    - QuestRuleNoImpulse
+    - QuestRuleNoSpendDays
+    - QuestRuleCategorySpendCap
+    - QuestRuleCoffeeSpendCap
+    - QuestRuleBeatLastMonthSavingsRate
   model.Recommendation:
     properties:
       description:
@@ -427,6 +610,25 @@ definitions:
         description: why it's irregular
         type: string
     type: object
+  service.LevelRewardView:
+    properties:
+      cosmetic:
+        type: string
+      feature:
+        type: string
+      icon:
+        type: string
+      level:
+        type: integer
+      name:
+        type: string
+      state:
+        type: string
+      unlocked:
+        type: boolean
+      xp_required:
+        type: integer
+    type: object
   service.MonthlyExpensePoint:
     properties:
       month:
@@ -473,20 +675,69 @@ definitions:
     type: object
   service.QuestBoard:
     properties:
+      can_generate_daily:
+        type: boolean
+      can_generate_weekly:
+        type: boolean
       can_reroll:
         type: boolean
+      daily_quests:
+        items:
+          $ref: '#/definitions/service.QuestView'
+        type: array
+      levels:
+        items:
+          $ref: '#/definitions/service.LevelRewardView'
+        type: array
       profile:
         $ref: '#/definitions/service.GameProfileView'
       quests:
         items:
           $ref: '#/definitions/service.QuestView'
         type: array
+      rewards:
+        items:
+          $ref: '#/definitions/service.LevelRewardView'
+        type: array
+      stats:
+        $ref: '#/definitions/service.QuestStats'
       streak:
         $ref: '#/definitions/service.StreakView'
+      weekly_quests:
+        items:
+          $ref: '#/definitions/service.QuestView'
+        type: array
+    type: object
+  service.QuestStats:
+    properties:
+      current_batch_completed:
+        type: integer
+      current_batch_remaining:
+        type: integer
+      current_batch_total:
+        type: integer
+      current_batch_xp_available:
+        type: integer
+      current_batch_xp_earned:
+        type: integer
+      daily_completed:
+        type: integer
+      daily_total:
+        type: integer
+      total_xp:
+        type: integer
+      weekly_completed:
+        type: integer
+      weekly_total:
+        type: integer
     type: object
   service.QuestView:
     properties:
       accent:
+        type: string
+      assigned_at:
+        type: string
+      completed_at:
         type: string
       current:
         type: number
@@ -494,7 +745,13 @@ definitions:
         type: string
       done:
         type: boolean
+      expires_at:
+        type: string
       key:
+        type: string
+      logo:
+        type: string
+      period:
         type: string
       target:
         type: number
@@ -504,6 +761,8 @@ definitions:
         type: string
       xp:
         type: integer
+      xp_awarded:
+        type: boolean
     type: object
   service.SpendingDNA:
     properties:
@@ -584,6 +843,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Get analytics dashboard data
       tags:
       - analytics
@@ -594,6 +855,11 @@ paths:
         impulse frequency, luxury drift, and top brands — entirely from real transactions.
         Not month-scoped; uses trailing 30/60-day windows like the existing behavior
         profiler.
+      parameters:
+      - description: Wallet ID to scope DNA to. Use 0 for General wallet.
+        in: query
+        name: wallet_id
+        type: integer
       produces:
       - application/json
       responses:
@@ -601,10 +867,16 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/service.SpendingDNA'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Get the user's behavioral spending DNA
       tags:
       - analytics
@@ -634,6 +906,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Generate an AI personal-finance insight
       tags:
       - analytics
@@ -669,6 +943,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Get multi-month expense trend
       tags:
       - analytics
@@ -700,6 +976,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Parse a natural language message (blocking)
       tags:
       - chat
@@ -731,6 +1009,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Parse a natural language message (SSE streaming)
       tags:
       - chat
@@ -751,6 +1031,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: List all user corrections
       tags:
       - corrections
@@ -781,15 +1063,153 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Delete a user correction
       tags:
       - corrections
+  /api/quest-presets:
+    get:
+      description: Returns DB-backed preset quests used by the reward assignment pool.
+        Pass include_inactive=true to include archived presets.
+      parameters:
+      - description: Include inactive/deleted presets
+        in: query
+        name: include_inactive
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.QuestPreset'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List quest presets
+      tags:
+      - quests
+    post:
+      consumes:
+      - application/json
+      description: Creates a daily or weekly preset quest definition. User assignment/completion
+        state remains stored separately.
+      parameters:
+      - description: Quest preset
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/controller.CreateQuestPresetRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.QuestPreset'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a quest preset
+      tags:
+      - quests
+  /api/quest-presets/{id}:
+    delete:
+      description: Archives a preset by setting is_active=false so existing user assignment
+        history remains readable.
+      parameters:
+      - description: Quest preset ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete a quest preset
+      tags:
+      - quests
+    patch:
+      consumes:
+      - application/json
+      description: Updates editable preset quest metadata/rules. Existing user assignments
+        keep their stored template key and history.
+      parameters:
+      - description: Quest preset ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Quest preset fields
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/controller.UpdateQuestPresetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.QuestPreset'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update a quest preset
+      tags:
+      - quests
   /api/quests:
     get:
-      description: Returns the user's current quest batch with progress evaluated
-        live from real transactions, plus game profile (level/XP) and streak. Quests
-        are auto-completed and XP is awarded idempotently as soon as their progress
-        condition is met.
+      description: Returns the user's active quest batches with progress evaluated
+        live from real transactions, plus game profile (level/XP) and streak. This
+        read does not auto-assign quests; call POST /api/quests/generate to activate
+        daily or weekly quests.
       produces:
       - application/json
       responses:
@@ -801,7 +1221,43 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Get the user's current quest board
+      tags:
+      - quests
+  /api/quests/generate:
+    post:
+      consumes:
+      - application/json
+      description: Randomly picks active preset quests for the requested period if
+        the user does not already have an active batch. Daily quests expire at next
+        midnight; weekly quests expire after Sunday at next Monday 00:00.
+      parameters:
+      - description: Quest period to activate
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/controller.GenerateQuestsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.QuestBoard'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Generate and activate daily or weekly quests
       tags:
       - quests
   /api/quests/reroll:
@@ -823,6 +1279,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Request a new set of quests
       tags:
       - quests
@@ -840,12 +1298,20 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Get financial summary
       tags:
       - transactions
   /api/transactions:
     get:
       description: Returns all saved income and expense transactions, newest first.
+      parameters:
+      - description: Wallet ID to filter by. Use 0 for General wallet. Omit for all
+          wallets.
+        in: query
+        name: wallet_id
+        type: integer
       produces:
       - application/json
       responses:
@@ -855,10 +1321,16 @@ paths:
             items:
               $ref: '#/definitions/model.Transaction'
             type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: List all transactions
       tags:
       - transactions
@@ -888,6 +1360,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Delete a transaction
       tags:
       - transactions
@@ -918,6 +1392,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Get transaction details
       tags:
       - transactions
@@ -954,6 +1430,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Correct a transaction's classification
       tags:
       - transactions
@@ -989,6 +1467,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: List transactions by category (paginated)
       tags:
       - transactions
@@ -996,11 +1476,6 @@ paths:
     get:
       description: Returns all wallets for the user, including the implicit General
         wallet.
-      parameters:
-      - description: User ID
-        in: query
-        name: user_id
-        type: string
       produces:
       - application/json
       responses:
@@ -1014,6 +1489,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: List wallets
       tags:
       - wallets
@@ -1022,10 +1499,6 @@ paths:
       - application/json
       description: Creates a new occasion wallet for the user.
       parameters:
-      - description: User ID
-        in: query
-        name: user_id
-        type: string
       - description: Wallet to create
         in: body
         name: body
@@ -1047,6 +1520,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Create a wallet
       tags:
       - wallets
@@ -1060,10 +1535,6 @@ paths:
         name: id
         required: true
         type: integer
-      - description: User ID
-        in: query
-        name: user_id
-        type: string
       produces:
       - application/json
       responses:
@@ -1076,7 +1547,50 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Remove or archive a wallet
+      tags:
+      - wallets
+    patch:
+      consumes:
+      - application/json
+      description: Updates wallet details such as monthly target, name, or icon. Passing
+        wallet ID 0 updates the user's General wallet after ensuring it exists.
+      parameters:
+      - description: Wallet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Wallet fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/controller.UpdateWalletRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.Wallet'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update a wallet
       tags:
       - wallets
   /api/wallets/current:
@@ -1094,6 +1608,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Get the current wallet
       tags:
       - wallets
@@ -1124,6 +1640,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/controller.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Set the current wallet
       tags:
       - wallets
@@ -1147,4 +1665,10 @@ paths:
       summary: Line Messaging API webhook
       tags:
       - webhook
+securityDefinitions:
+  BearerAuth:
+    description: LIFF ID token, e.g. "Bearer <id_token from liff.getIDToken()>"
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
